@@ -168,13 +168,13 @@ struct HomeView: View {
             .overlay { Capsule().strokeBorder(STVTheme.glassBorder, lineWidth: 1) }
             .padding(.horizontal, 16)
             HomeChannelBar(items: HomeSource.all, selection: $source, label: \.label, ink: headerInk) { showChannels = true }
-                .padding(.leading, 20)
-                .padding(.top, pinned ? 14 : 18)
+                .padding(.leading, 10)
+                .padding(.top, pinned ? 10 : 14)
         }
         .padding(.top, 8)
         .padding(.bottom, pinned ? 10 : 0)
         .dsPinned(pinned)
-        .animation(.easeOut(duration: 0.22), value: pinned)
+        .animation(.easeOut(duration: 0.18), value: pinned)
         .zIndex(1)
     }
 
@@ -186,14 +186,15 @@ struct HomeView: View {
             // it would be a dark band in light mode, so use a soft tint of the page colour instead.
             if url != nil { Color(red: 0.08, green: 0.10, blue: 0.15) } else { STVTheme.elevated }
             if let url {
-                CoverView(url: url, corner: 0).blur(radius: 48).opacity(0.75).id(url)
+                CoverView(url: url, corner: 0).blur(radius: 36).opacity(0.75).id(url)
+                    .drawingGroup(opaque: false)
                     .transition(.opacity)
             }
         }
         .frame(height: 420)
         .clipped()
         .mask(LinearGradient(colors: [.black, .black.opacity(0.85), .clear], startPoint: .top, endPoint: .bottom))
-        .animation(.easeInOut(duration: 0.45), value: url)
+        .animation(.easeInOut(duration: 0.3), value: url)
         .ignoresSafeArea()
         .allowsHitTesting(false)
     }
@@ -505,6 +506,7 @@ enum HomeFmt {
 }
 
 /// 分类条：未选中 17pt 次要色，选中 20pt 粗体 + 品牌色短条（随选中项滑动）；点击或翻页时选中项自动滚到居中。
+/// 优化：扩大每个标签的上下左右点击热区、消除 22pt 间隔死区、加入即时按压缩放与轻触觉反馈。
 struct HomeChannelBar<T: Hashable>: View {
     let items: [T]
     @Binding var selection: T
@@ -516,14 +518,24 @@ struct HomeChannelBar<T: Hashable>: View {
         HStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .lastTextBaseline, spacing: 22) {
+                    HStack(alignment: .lastTextBaseline, spacing: 2) {
                         ForEach(items, id: \.self) { it in
                             let on = it == selection
-                            Button { withAnimation(DS.select) { selection = it } } label: {
+                            Button {
+                                if selection != it {
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                }
+                                withAnimation(DS.select) { selection = it }
+                            } label: {
                                 UnderlineTabLabel(title: label(it), on: on, ink: ink, inkOff: STVTheme.secondary, ns: ns)
-                                    .frame(minHeight: 40, alignment: .bottom)
-                            }.buttonStyle(.plain).id(it).accessibilityIdentifier("home.channel.\(label(it))")
-                                .accessibilityAddTraits(on ? .isSelected : [])
+                                    .padding(.horizontal, 10)
+                                    .frame(minWidth: 44, minHeight: 44, alignment: .bottom)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressScale(scale: 0.94))
+                            .id(it)
+                            .accessibilityIdentifier("home.channel.\(label(it))")
+                            .accessibilityAddTraits(on ? .isSelected : [])
                         }
                         Color.clear.frame(width: 12, height: 1)
                     }
@@ -531,15 +543,20 @@ struct HomeChannelBar<T: Hashable>: View {
                 .accessibilityIdentifier("home.channels")
                 .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.88),
                                              .init(color: .clear, location: 1)], startPoint: .leading, endPoint: .trailing))
-                .compatOnChange(of: selection) { it in withAnimation(.compatSnappy) { proxy.scrollTo(it, anchor: .center) } }
+                .compatOnChange(of: selection) { it in withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(it, anchor: .center) } }
                 .onAppear { proxy.scrollTo(selection, anchor: .center) }
             }
-            Button(action: onExpand) {
+            Button(action: {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                onExpand()
+            }) {
                 Image(systemName: "chevron.down").font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(STVTheme.secondary).frame(width: 44, height: 40)
-            }.buttonStyle(.plain).accessibilityLabel("展开全部频道").accessibilityIdentifier("home.expand")
+                    .foregroundStyle(STVTheme.secondary)
+                    .frame(width: 48, height: 44)
+                    .contentShape(Rectangle())
+            }.buttonStyle(PressScale(scale: 0.92)).accessibilityLabel("展开全部频道").accessibilityIdentifier("home.expand")
         }
-        .frame(height: 40)
+        .frame(height: 44)
     }
 }
 
@@ -595,11 +612,13 @@ private struct PosterHero: View {
         let url = picks.indices.contains(index) ? picks[index].cover : ""
         return ZStack {
             Color(red: 0.14, green: 0.10, blue: 0.10)
-            CoverView(url: url, corner: 0).blur(radius: 40).scaleEffect(1.5).opacity(0.85).id(url).transition(.opacity)
+            CoverView(url: url, corner: 0).blur(radius: 32).scaleEffect(1.4).opacity(0.85).id(url)
+                .drawingGroup(opaque: false)
+                .transition(.opacity)
             LinearGradient(colors: [.black.opacity(0.18), .black.opacity(0.62)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
         .clipped()
-        .animation(.easeInOut(duration: 0.4), value: url)
+        .animation(.easeInOut(duration: 0.3), value: url)
         .allowsHitTesting(false)
     }
 

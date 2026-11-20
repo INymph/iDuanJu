@@ -5,9 +5,9 @@ import SwiftUI
 
 enum DS {
     /// One spring for selection changes (tabs, segments, chips) and one for panels / bars.
-    static let select = Animation.spring(response: 0.32, dampingFraction: 0.86)
-    static let panel = Animation.spring(response: 0.42, dampingFraction: 0.88)
-    static let press = Animation.spring(response: 0.22, dampingFraction: 0.8)
+    static let select = Animation.spring(response: 0.22, dampingFraction: 0.88)
+    static let panel = Animation.spring(response: 0.32, dampingFraction: 0.90)
+    static let press = Animation.spring(response: 0.14, dampingFraction: 0.82)
     /// Spaced numbers like the spec: "512.6 万", "全 82 集".
     static func count(_ n: Int) -> String {
         if n >= 100_000_000 { return String(format: "%.1f 亿", Double(n) / 100_000_000) }
@@ -115,18 +115,27 @@ struct UnderlineTabs<T: Hashable>: View {
     var idPrefix = "tabs"
     @Namespace private var ns
     var body: some View {
-        HStack(alignment: .lastTextBaseline, spacing: small ? 24 : 22) {
+        HStack(alignment: .lastTextBaseline, spacing: small ? 6 : 4) {
             ForEach(items, id: \.self) { it in
                 let on = it == selection
-                Button { withAnimation(DS.select) { selection = it } } label: {
+                Button {
+                    if selection != it {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                    withAnimation(DS.select) { selection = it }
+                } label: {
                     UnderlineTabLabel(title: label(it), on: on, small: small, ns: ns)
+                        .padding(.horizontal, small ? 9 : 9)
+                        .frame(minWidth: 44, minHeight: small ? 38 : 44, alignment: small ? .center : .bottom)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressScale(scale: 0.95))
                 .accessibilityIdentifier("\(idPrefix).\(label(it))")
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .frame(height: small ? 34 : 40, alignment: small ? .center : .bottom)
+        .padding(.horizontal, -9)
+        .frame(height: small ? 38 : 44, alignment: small ? .center : .bottom)
     }
 }
 
