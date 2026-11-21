@@ -3,8 +3,7 @@ import AVKit
 import MediaPlayer
 import UIKit
 
-/// The system player: every source shape (incl. the resource-loader AES path and CENC files), the
-/// fallback when AetherEngine cannot open an episode.
+/// iOS 16 system player, including the resource-loader AES path and decrypted CENC files.
 @MainActor final class AVPlayerEngine: PlayerEngine {
     let kind = PlayerEngineKind.avplayer
     var onFailed: ((Error?) -> Void)?
@@ -27,6 +26,8 @@ import UIKit
     private var statusObservation: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private var generation = 0
+    private var tracksTask: Task<Void, Never>?
+    private var loadedTrackCount: Int?
     private var audioGroup: AVMediaSelectionGroup?
     private var legibleGroup: AVMediaSelectionGroup?
     private(set) var audioTracks: [MediaTrack] = []
@@ -39,7 +40,6 @@ import UIKit
         view.isUserInteractionEnabled = false
         view.playerLayer.player = player
         view.playerLayer.videoGravity = .resizeAspect
-        transport.bind(player)
         transport.onRequest = { [weak self] in self?.onPlaybackRequested?($0) }
     }
 
@@ -48,16 +48,22 @@ import UIKit
     func load(_ src: PlaybackCoordinator.Source, stream: HGStream?, start: Double?, title: String) async throws {
         generation += 1
         let gen = generation
+        tracksTask?.cancel(); tracksTask = nil; loadedTrackCount = nil
         transport.acceptingRequests = false
+        transport.bind(player)
+        view.playerLayer.player = player
         transport.expectPaused(true)
+        statusObservation?.invalidate()
         statusObservation = nil
         guard let item = PlaybackCoordinator.makeItem(src) else { throw URLError(.badURL) }
         item.nowPlayingInfo = [MPMediaItemPropertyTitle: title]
         audioGroup = nil; legibleGroup = nil; audioTracks = []; subtitleTracks = []; selectedAudio = nil; selectedSubtitle = nil
         player.replaceCurrentItem(with: item)
-        statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+        statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor in
-                guard let self, self.generation == gen, item.status == .failed else { return }
+                guard let self, self.generation == gen else { return }
+                if item.status == .readyToPlay { self.ensureTracks(item) }
+                guard item.status == .failed else { return }
                 #if DEBUG
                 let ns = item.error as NSError?
                 let under = (ns?.userInfo[NSUnderlyingErrorKey] as? NSError).map { "\($0.domain) \($0.code)" } ?? "-"
@@ -76,9 +82,10 @@ import UIKit
         if let start, start > 0 {
             await player.seek(to: CMTime(seconds: start, preferredTimescale: 600))
         }
+        guard generation == gen, player.currentItem === item, !Task.isCancelled else { throw CancellationError() }
         if item.status == .failed { throw item.error ?? URLError(.cannotOpenFile) }
         transport.acceptingRequests = true
-        Task { [weak self] in await self?.refreshTracks(item) }
+        ensureTracks(item)
     }
 
     func play(rate: Double) {
@@ -101,11 +108,14 @@ import UIKit
     func stop() {
         transport.acceptingRequests = false
         generation += 1
+        tracksTask?.cancel(); tracksTask = nil; loadedTrackCount = nil
+        statusObservation?.invalidate()
         statusObservation = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
-        player.pause()
-        player.replaceCurrentItem(with: nil)
+        transport.bind(nil)
+        view.playerLayer.player = nil
+        if player.currentItem != nil { player.replaceCurrentItem(with: nil) }
     }
 
     var currentTime: Double { player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0 }
@@ -130,13 +140,31 @@ import UIKit
 
     // MARK: Tracks (AVMediaSelection)
 
+    private func ensureTracks(_ item: AVPlayerItem) {
+        guard player.currentItem === item, item.status == .readyToPlay,
+              loadedTrackCount != item.tracks.count, tracksTask == nil else { return }
+        let gen = generation
+        let count = item.tracks.count
+        tracksTask = Task { [weak self] in
+            guard let self else { return }
+            await self.refreshTracks(item)
+            guard self.generation == gen, self.player.currentItem === item else { return }
+            self.loadedTrackCount = count
+            self.tracksTask = nil
+        }
+    }
+
     private func refreshTracks(_ item: AVPlayerItem) async {
-        if let g = try? await item.asset.loadMediaSelectionGroup(for: .audible) {
+        let audible = try? await item.asset.loadMediaSelectionGroup(for: .audible)
+        guard !Task.isCancelled, player.currentItem === item else { return }
+        if let g = audible {
             audioGroup = g
             audioTracks = g.options.enumerated().map { MediaTrack(id: $0.offset, title: $0.element.displayName, language: $0.element.extendedLanguageTag) }
             selectedAudio = item.currentMediaSelection.selectedMediaOption(in: g).flatMap { g.options.firstIndex(of: $0) }
         }
-        if let g = try? await item.asset.loadMediaSelectionGroup(for: .legible) {
+        let legible = try? await item.asset.loadMediaSelectionGroup(for: .legible)
+        guard !Task.isCancelled, player.currentItem === item else { return }
+        if let g = legible {
             legibleGroup = g
             subtitleTracks = g.options.enumerated().map { MediaTrack(id: $0.offset, title: $0.element.displayName, language: $0.element.extendedLanguageTag) }
             selectedSubtitle = item.currentMediaSelection.selectedMediaOption(in: g).flatMap { g.options.firstIndex(of: $0) }
@@ -160,7 +188,14 @@ import UIKit
         guard let item = player.currentItem else { return PlayerTech() }
         var t = await PlayerTech.read(item, stream: stream)
         t.engine = kind.short
-        if let item = player.currentItem { await refreshTracks(item) }
+        guard player.currentItem === item else { return PlayerTech() }
+        ensureTracks(item)
+        if let g = audioGroup {
+            selectedAudio = item.currentMediaSelection.selectedMediaOption(in: g).flatMap { g.options.firstIndex(of: $0) }
+        }
+        if let g = legibleGroup {
+            selectedSubtitle = item.currentMediaSelection.selectedMediaOption(in: g).flatMap { g.options.firstIndex(of: $0) }
+        }
         return t
     }
 

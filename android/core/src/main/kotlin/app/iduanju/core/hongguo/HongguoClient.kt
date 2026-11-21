@@ -949,37 +949,6 @@ class HongguoClient(
     }
 
     // ---- parsing ----
-    private fun celebrityData(id: String, path: String, query: String): JSONObject {
-        require(id.isNotEmpty() && id.all { it in '0'..'9' }) { "演员 ID 无效" }
-        val url = "https://api5-normal-sinfonlineb.fqnovel.com/reading/user/celebrity/$path/v1/?$query&" +
-            listQuery(ensureDevice(), System.currentTimeMillis())
-        return ok(list(url), "演员资料")
-    }
-
-    fun celebrityProfile(id: String): HGActorProfile {
-        val info = J.dict(celebrityData(id, "homepage", "encrypted_celebrity_id=$id").opt("celebrity_info"))
-        if (info.length() == 0) throw ProviderException.upstream("未查询到该演员信息")
-        fun actor(key: String, item: JSONObject) = HGCelebrity(key, J.str(item.opt("nickname")),
-            J.str(item.opt("avatar")), intro = J.str(item.opt("intro")))
-        val related = J.arr(info.opt("related_celebrities")).map { raw ->
-            val item = J.dict(raw)
-            actor(J.str(item.opt("celebrity_id")), item)
-        }.filter { it.id.isNotEmpty() && it.name.isNotEmpty() }.distinctBy { it.id }
-        return HGActorProfile(actor(id, info), related)
-    }
-
-    fun celebrityWorks(id: String): HGActorWorks {
-        val data = celebrityData(id, "works", "encrypted_celebrity_ids=$id&offset=0&count=200&req_scene=0")
-        val works = J.dict(J.dict(data.opt("works")).opt(id))
-        val items = J.arr(works.opt("video_list")).map { raw ->
-            val video = J.dict(raw)
-            parseVideoData(video).apply {
-                if (episodeCount == 0) episodeCount = Regex("""\d+(?=\s*集)""").find(J.str(video.opt("sub_title")))?.value?.toIntOrNull() ?: 0
-            }
-        }.filter { looksSID(it.seriesId) && it.title.isNotEmpty() }.distinctBy { it.seriesId }
-        return HGActorWorks(items, maxOf(items.size, J.int(works.opt("total_count"))))
-    }
-
     fun looksSID(s: String): Boolean = s.length in 15..25 && s.all { it.isDigit() }
 
     fun firstID(m: JSONObject, vararg keys: String): String {

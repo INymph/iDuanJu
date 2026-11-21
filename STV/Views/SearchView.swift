@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 
 struct SearchView: View {
@@ -13,30 +14,31 @@ struct SearchView: View {
         #endif
         return .hongguo
     }()
-    @StateObject private var pager = Pager()
+    @State private var pager = Pager()
     @State private var hot: [HGSeries] = []
     @State private var hotError: Error?
     @State private var discoverSeed = 0
     @State private var editingHistory = false
-    @Environment(\.layoutMetrics) private var layout
-    @ObservedObject private var library = LibraryStore.shared
+    private let library = LibraryStore.shared
 
     var body: some View {
-        VStack(spacing: 10) {
-            SearchField(text: $query, onSubmit: submit, onCancel: pushed ? { dismiss() } : (submitted.isEmpty ? nil : { query = ""; submitted = "" }))
-                .padding(.horizontal, 16).padding(.top, 6)
-            ScrollView {
-                if submitted.isEmpty { landing } else { results }
+        WithPerceptionTracking {
+            VStack(spacing: 10) {
+                SearchField(text: $query, onSubmit: submit, onCancel: pushed ? { dismiss() } : (submitted.isEmpty ? nil : { query = ""; submitted = "" }))
+                    .padding(.horizontal, 16).padding(.top, 6)
+                ScrollView {
+                    if submitted.isEmpty { landing } else { results }
+                }
             }
+            .background(STVTheme.bg.ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
+            .task {
+                if startEditingHistory { editingHistory = true }
+                if let q = initialQuery, submitted.isEmpty, !q.isEmpty { query = q; submit() }
+                if hot.isEmpty { await loadHot() }
+            }
+            .onChangeCompat(of: source) { run() }
         }
-        .background(STVTheme.bg.ignoresSafeArea())
-        .toolbar(.hidden, for: .navigationBar)
-        .task {
-            if startEditingHistory { editingHistory = true }
-            if let q = initialQuery, submitted.isEmpty, !q.isEmpty { query = q; submit() }
-            if hot.isEmpty { await loadHot() }
-        }
-        .compatOnChange(of: source) { run() }
     }
 
     // MARK: landing
@@ -78,13 +80,21 @@ struct SearchView: View {
                 SectionHeader(title: "搜索实时排行")
                 if let hotError, hot.isEmpty { ErrorStateView(error: hotError) { Task { await loadHot() } } }
                 else if hot.isEmpty {
-                    HStack(spacing: 8) { ForEach(0..<3, id: \.self) { _ in ShimmerBlock().aspectRatio(0.6, contentMode: .fit) } }.padding(.horizontal, 16)
+                    HStack(spacing: 8) { ForEach(0..<3, id: \.self) { _ in WithPerceptionTracking {
+                        ShimmerBlock().aspectRatio(0.6, contentMode: .fit)
+                    } } }.padding(.horizontal, 16)
                 } else {
                     HStack(spacing: 8) {
-                        ForEach(0..<min(3, hot.count), id: \.self) { i in TopRankCard(series: hot[i], rank: i + 1) }
+                        ForEach(0..<min(3, hot.count), id: \.self) { i in WithPerceptionTracking {
+                            TopRankCard(series: hot[i], rank: i + 1)
+                        } }
                     }.padding(.horizontal, 16)
-                    LazyVGrid(columns: layout.wideGridItems(spacing: 14), spacing: 14) {
-                        ForEach(Array(hot.dropFirst(3).enumerated()), id: \.element.id) { i, s in CompactRankRow(series: s, rank: i + 4) }
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+                        WithPerceptionTracking {
+                            ForEach(Array(hot.dropFirst(3).enumerated()), id: \.element.id) { i, s in WithPerceptionTracking {
+                                CompactRankRow(series: s, rank: i + 4)
+                            } }
+                        }
                     }.padding(.horizontal, 16)
                 }
             }
@@ -98,7 +108,7 @@ struct SearchView: View {
             TextTabStrip(items: SourceGate.shared.searchSources, selection: $source) { $0.label }
             if let e = pager.error, pager.items.isEmpty { ErrorStateView(error: e) { run() } }
             else if !pager.isLoading && pager.items.isEmpty {
-                CompatEmptyStateView(title: "无搜索结果", systemImage: "magnifyingglass", description: "没有找到与“\(submitted)”相关的内容")
+                UnavailableStateView.search(text: submitted)
             } else {
                 NumberedGrid(items: pager.items, numbered: false, hasMore: pager.hasMore, loading: pager.isLoading) { pager.loadMore() }
             }
@@ -119,9 +129,13 @@ struct SearchView: View {
     private func loadHot() async {
         do {
             var p = try await HongguoClient.shared.rank(sub: .hotSearch, genre: .all)
-            if p.hasMore, let more = try? await HongguoClient.shared.rank(sub: .hotSearch, genre: .all, offset: p.nextOffset ?? 0, seenIds: p.items.map(\.seriesId)) { p.items += more.items }
+            try Task.checkCancellation()
+            // Show page one immediately; page two must not hold back the whole search landing page.
             hot = Array(p.items.prefix(23)); hotError = nil
-        } catch { hotError = error }
+            if p.hasMore, let more = try? await HongguoClient.shared.rank(sub: .hotSearch, genre: .all, offset: p.nextOffset ?? 0, seenIds: p.items.map(\.seriesId)) { p.items += more.items }
+            try Task.checkCancellation()
+            hot = Array(p.items.prefix(23)); hotError = nil
+        } catch { if !Task.isCancelled { hotError = error } }
     }
 }
 

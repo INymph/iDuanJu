@@ -137,9 +137,9 @@ fun SearchScreen(onOpenDetail: (String) -> Unit, initialQuery: String = "") {
         }
         val grid = rememberLazyGridState()
         if (submitted.isEmpty()) {
-            LazyVerticalGrid(GridCells.Fixed(app.iduanju.ui.components.LocalLayoutMetrics.current.wideCardCols), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 110.dp),
+            LazyVerticalGrid(GridCells.Fixed(2), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 110.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (lib.searchHistory.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                if (lib.searchHistory.isNotEmpty()) item(span = { GridItemSpan(2) }) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("历史搜索", color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.weight(1f))
@@ -155,7 +155,7 @@ fun SearchScreen(onOpenDetail: (String) -> Unit, initialQuery: String = "") {
                     }
                 }
                 val discover = if (hot.size > 3) hot.drop(3).map { it.title }.shuffled(java.util.Random(seed + 1L)).take(8) else emptyList()
-                if (discover.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                if (discover.isNotEmpty()) item(span = { GridItemSpan(2) }) {
                     Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("搜索发现", color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.weight(1f))
@@ -166,7 +166,7 @@ fun SearchScreen(onOpenDetail: (String) -> Unit, initialQuery: String = "") {
                         }
                     }
                 }
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                item(span = { GridItemSpan(2) }) {
                     Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("搜索实时排行", color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                         when {
@@ -194,10 +194,10 @@ fun SearchScreen(onOpenDetail: (String) -> Unit, initialQuery: String = "") {
                     if (hasMore && !loading && last >= items.size - 4) loadMore(false)
                 }
             }
-            LazyVerticalGrid(GridCells.Fixed(app.iduanju.ui.components.LocalLayoutMetrics.current.posterCols), Modifier.fillMaxSize(), state = grid, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 110.dp),
+            LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize(), state = grid, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 110.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 items(items, key = { it.seriesId + it.title }) { s -> HomePosterCard(s, onOpenDetail) }
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                item(span = { GridItemSpan(3) }) {
                     Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                         when {
                             loading -> CircularProgressIndicator(color = c.secondary, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))

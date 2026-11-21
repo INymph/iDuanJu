@@ -25,11 +25,6 @@ import app.iduanju.core.plugin.PluginManifest
 import app.iduanju.plugin.PluginStore
 import app.iduanju.ui.theme.IdjThemeColors
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import app.iduanju.core.cms.TVBoxImport
-import app.iduanju.core.cms.MacCMS
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -61,31 +56,14 @@ fun PluginsScreen(onBack: () -> Unit) {
             busy = false
         }
     }
-    var liveLists by remember { mutableStateOf(emptyList<TVBoxImport.Live>()) }
-    suspend fun describe(r: PluginStore.Pasted) = when (r) {
+    fun describe(r: PluginStore.Pasted) = when (r) {
         is PluginStore.Pasted.Plugin -> "已安装「${r.rec.name}」${r.rec.version}"
         is PluginStore.Pasted.Subscription -> "已添加订阅（${r.sub.plugins.size} 个插件 / ${r.sub.cms.size} 个采集站），在下方按需安装"
-        is PluginStore.Pasted.TVBox -> {
-            var added = 0
-            var failed = 0
-            withContext(Dispatchers.Main) { liveLists = r.config.lives }
-            for (batch in r.config.sites.chunked(8)) {
-                val results = coroutineScope { batch.map { site -> async { site to runCatching { MacCMS.fetchCategories(site.api) }.getOrNull() } }.awaitAll() }
-                withContext(Dispatchers.Main) {
-                    for ((site, cats) in results) {
-                        if (cats == null) failed++ else { cms.saveValidated(site.name, site.api, site.adult, "TVBox", cats); added++ }
-                    }
-                    message = "正在验证采集站 ${added + failed}/${r.config.sites.size}"
-                }
-            }
-            "TVBox API 站点：验证后添加 $added/${r.config.sites.size}${if (failed > 0) "，验证失败 $failed" else ""}${if (r.config.skipped > 0) "，跳过 ${r.config.skipped} 个脚本/重复/不兼容项" else ""}"
-        }
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) run {
             val text = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: error("读取文件失败")
-            val name = ctx.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-            describe(store.interpret(text, "file", name?.substringBeforeLast('.')))
+            describe(store.interpret(text, "file"))
         }
     }
 
@@ -112,16 +90,13 @@ fun PluginsScreen(onBack: () -> Unit) {
         Group("添加插件", footer = "插件运行在 QuickJS 沙箱里，只能访问 manifest 声明的域名；未成年相关内容一律过滤。") {
             LinkRow("从网址添加", ProfileIcons.link) { dialog = "url" }
             RowDivider()
-            LinkRow("从文件导入（插件 / M3U / TVBox JSON）", ProfileIcons.file) { picker.launch(arrayOf("*/*")) }
+            LinkRow("从文件导入（.idjplugin）", ProfileIcons.file) { picker.launch(arrayOf("*/*")) }
             RowDivider()
             LinkRow("粘贴插件内容", ProfileIcons.paste) { dialog = "paste" }
             RowDivider()
             LinkRow(if (busy) "正在检查更新…" else "检查更新", ProfileIcons.sync) {
                 if (!busy) run { store.refreshSubscriptions(); "已检查订阅中的插件更新" }
             }
-        }
-        if (liveLists.isNotEmpty()) Group("TVBox 直播") {
-            LinkRow("选择直播列表（${liveLists.size}）", ProfileIcons.link) { dialog = "live" }
         }
         Group("订阅") {
             store.subscriptions.forEachIndexed { i, s ->
@@ -192,12 +167,6 @@ fun PluginsScreen(onBack: () -> Unit) {
             if (dialog == "url") "插件 / manifest / 订阅列表的 https 链接" else "订阅列表 https 链接", onDismiss = { dialog = null }) { text ->
             dialog = null; run { describe(store.interpret(text)) }
         }
-        "live" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("选择直播列表") }, text = {
-            androidx.compose.foundation.lazy.LazyColumn { items(liveLists.size) { i ->
-                val live = liveLists[i]
-                TextButton({ dialog = null; run { "已添加「${store.installLive(live).name}」" } }) { Text(live.name) }
-            } }
-        }, confirmButton = { TextButton({ dialog = null }) { Text("关闭") } })
         "paste" -> PasteDialog(onDismiss = { dialog = null }) { text -> dialog = null; run { describe(store.interpret(text, "paste")) } }
         "cms" -> CMSDialog(onDismiss = { dialog = null }) { name, api, isAdult ->
             dialog = null; run { val s = cms.add(name, api, isAdult); "已添加「${s.name}」· ${s.categories.size} 个分类" }
@@ -252,7 +221,7 @@ private fun PasteDialog(onDismiss: () -> Unit, onDone: (String) -> Unit) {
         onDismissRequest = onDismiss, title = { Text("粘贴插件内容") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(text, { text = it }, label = { Text(".idjplugin、M3U 频道列表或 TVBox JSON 配置") }, maxLines = 8, modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp))
+                OutlinedTextField(text, { text = it }, label = { Text(".idjplugin 内容或 {\"manifest\":…}") }, maxLines = 8, modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp))
                 TextAction("从剪贴板粘贴") { clip.getText()?.text?.let { text = it } }
             }
         },

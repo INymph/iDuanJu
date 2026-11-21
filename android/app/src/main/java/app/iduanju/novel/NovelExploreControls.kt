@@ -8,9 +8,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.unit.Constraints
-import kotlin.math.roundToInt
 import app.iduanju.core.novel.NovelCategory
 import kotlinx.coroutines.delay
 
@@ -19,10 +16,13 @@ import kotlinx.coroutines.delay
 @Composable
 internal fun NovelExploreControls(controls:List<NovelCategory>,enabled:Boolean,onAction:(NovelCategory,String?)->Unit) {
     if(controls.isEmpty())return
-    Box(Modifier.fillMaxWidth().heightIn(max=240.dp).verticalScroll(rememberScrollState()).padding(horizontal=12.dp)) {
-        SourceControlFlex(controls) {
+    BoxWithConstraints(Modifier.fillMaxWidth().heightIn(max=240.dp).verticalScroll(rememberScrollState()).padding(horizontal=12.dp)) {
+        val width=maxWidth
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp),verticalArrangement=Arrangement.spacedBy(2.dp)) {
             controls.forEach { c ->
-                Box(Modifier.testTag("novel.filter."+c.title)) {
+                if(c.style.wrapBefore)Spacer(Modifier.fillMaxWidth().height(0.dp))
+                val child=if(c.style.basis>0)Modifier.width((width*c.style.basis.coerceAtMost(1.0).toFloat()).coerceAtLeast(48.dp)) else if(c.style.grow>0)Modifier.weight(c.style.grow.toFloat()) else Modifier
+                Box(child.testTag("novel.filter."+c.title)) {
                     when(c.type) {
                         "text" -> {
                             var text by remember(c.selectionKey,c.value){mutableStateOf(c.value)}
@@ -40,43 +40,6 @@ internal fun NovelExploreControls(controls:List<NovelCategory>,enabled:Boolean,o
                     }
                 }
             }
-        }
-    }
-}
-
-/** Same flex-basis + flex-grow + wrap-before contract as the source, without synthetic blank rows.
- * FlowRow's weight is not equivalent: combining it with a fixed basis previously discarded grow,
- * leaving three filter chips squeezed into 60% of the row. This layout distributes remaining width.
- */
-@Composable
-private fun SourceControlFlex(controls:List<NovelCategory>,content:@Composable ()->Unit) {
-    Layout(content=content,modifier=Modifier.fillMaxWidth()) { nodes,constraints ->
-        val width=constraints.maxWidth
-        val gap=6.dp.roundToPx()
-        val rows=mutableListOf<MutableList<Pair<Int,Int>>>()
-        var row=mutableListOf<Pair<Int,Int>>()
-        var used=0
-        nodes.forEachIndexed { i,node ->
-            val style=controls[i].style
-            val basis=if(style.basis>0)(width*style.basis.coerceAtMost(1.0)).roundToInt() else node.maxIntrinsicWidth(Constraints.Infinity)
-            val w=basis.coerceIn(0,width)
-            if(row.isNotEmpty()&&(style.wrapBefore||used+gap+w>width)){rows.add(row);row=mutableListOf();used=0}
-            if(row.isNotEmpty())used+=gap
-            row.add(i to w);used+=w
-        }
-        if(row.isNotEmpty())rows.add(row)
-        val measured=rows.map { r ->
-            val extra=(width-r.sumOf{it.second}-gap*(r.size-1)).coerceAtLeast(0)
-            val grow=r.sumOf { controls[it.first].style.grow.coerceAtLeast(0.0) }
-            r.map { (i,w) ->
-                val share=if(grow>0)(extra*controls[i].style.grow.coerceAtLeast(0.0)/grow).toInt() else 0
-                nodes[i].measure(Constraints.fixedWidth((w+share).coerceAtMost(width)))
-            }
-        }
-        val height=measured.sumOf{r->r.maxOfOrNull{it.height}?:0}+gap*(measured.size-1).coerceAtLeast(0)
-        layout(width,height){
-            var y=0
-            measured.forEach { r -> var x=0;r.forEach{it.placeRelative(x,y);x+=it.width+gap};y+=(r.maxOfOrNull{it.height}?:0)+gap }
         }
     }
 }

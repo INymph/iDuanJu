@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 
 /// 漫画 home: source switch, category chips, cover grid, search, 继续阅读 / 收藏.
@@ -13,8 +14,7 @@ struct MangaHomeView: View {
     @State private var error: String?
     @State private var query = ""
     @State private var searching: String?
-    @Environment(\.layoutMetrics) private var layout
-    @ObservedObject private var store = MangaStore.shared
+    private let store = MangaStore.shared
 
     private var provider: MangaProvider { MangaFixtures.provider ?? source.provider }
     private var cats: [MangaCategory] { _ = PluginStore.shared.revision; return provider.categories }
@@ -25,54 +25,78 @@ struct MangaHomeView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(sources) { s in
-                                GlassChip(title: s.label, selected: s == source) { if s != source { category = nil; items = []; source = s } }
-                                    .accessibilityIdentifier("manga.source.\(s.rawValue)")
+        WithPerceptionTracking {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    WithPerceptionTracking {
+                        sourceBar
+                        searchBar
+                        if searching == nil {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(cats) { c in WithPerceptionTracking {
+                                        GlassChip(title: c.title, selected: c.id == (category ?? cats.first)?.id) { category = c }
+                                    } }
+                                }.padding(.horizontal, 16)
                             }
                         }
+                        if !store.recent.isEmpty && searching == nil { continueRow }
+                        if let error { Text(error).font(.caption).foregroundStyle(STVTheme.accentWarm).padding(.horizontal, 16) }
+                        mangaGrid
+                        if loading { ProgressView().frame(maxWidth: .infinity).padding() }
+                        else if hasMore && !items.isEmpty {
+                            Color.clear.frame(height: 30).onAppear { Task { await load(more: true) } }
+                        }
+                        Text("来源：\(source.note)").font(.caption2).foregroundStyle(STVTheme.secondary).padding(.horizontal, 16)
                     }
-                    NavigationLink(value: Route.mangaLibrary) { Image(systemName: "books.vertical").font(.system(size: 17)) }
-                        .foregroundStyle(STVTheme.text).accessibilityIdentifier("manga.library").accessibilityLabel("书架")
-                }.padding(.horizontal, 16).padding(.top, 6)
-                SearchField(text: $query, placeholder: "搜索\(source.label)", onSubmit: { searching = query.isEmpty ? nil : query; reload() },
-                            onCancel: searching == nil ? nil : { query = ""; searching = nil; reload() })
-                    .padding(.horizontal, 16)
-                if searching == nil {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(cats) { c in GlassChip(title: c.title, selected: c.id == (category ?? cats.first)?.id) { category = c } }
-                        }.padding(.horizontal, 16)
+                }.padding(.bottom, 24)
+            }
+            .scrollIndicators(.hidden)
+            .refreshable { await load(more: false) }
+            .background(embedded ? Color.clear : STVTheme.bg)
+            .navigationTitle(embedded ? "" : "漫画").navigationBarTitleDisplayMode(.inline)
+            .toolbar(embedded ? .hidden : .visible, for: .navigationBar)
+            .task(id: "\(source.rawValue)|\(category?.id ?? "")") { await load(more: false) }
+            .onChangeCompat(of: sources) { _, now in if !now.contains(source) { category = nil; source = .baozi } }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("manga.home")
+        }
+    }
+
+    private var sourceBar: some View {
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(sources) { s in
+                        WithPerceptionTracking {
+                            GlassChip(title: s.label, selected: s == source) { if s != source { category = nil; items = []; source = s } }
+                                .accessibilityIdentifier("manga.source.\(s.rawValue)")
+                        }
                     }
                 }
-                if !store.recent.isEmpty && searching == nil { continueRow }
-                if let error { Text(error).font(.caption).foregroundStyle(STVTheme.accentWarm).padding(.horizontal, 16) }
-                LazyVGrid(columns: layout.posterGridItems(spacing: 10), spacing: 14) {
-                    ForEach(items) { m in
+            }
+            NavigationLink(value: Route.mangaLibrary) { Image(systemName: "books.vertical").font(.system(size: 17)) }
+                .foregroundStyle(STVTheme.text).accessibilityIdentifier("manga.library").accessibilityLabel("书架")
+        }.padding(.horizontal, 16).padding(.top, 6)
+    }
+
+    private var searchBar: some View {
+        SearchField(text: $query, placeholder: "搜索\(source.label)", onSubmit: { searching = query.isEmpty ? nil : query; reload() },
+                    onCancel: searching == nil ? nil : { query = ""; searching = nil; reload() })
+            .padding(.horizontal, 16)
+    }
+
+    private var mangaGrid: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 14) {
+            WithPerceptionTracking {
+                ForEach(items) { m in
+                    WithPerceptionTracking {
                         NavigationLink(value: Route.manga(m)) { MangaCell(item: m) }.buttonStyle(.plain)
                             .accessibilityIdentifier("manga.cell.\(m.mangaId)")
                     }
-                }.padding(.horizontal, 16)
-                if loading { ProgressView().frame(maxWidth: .infinity).padding() }
-                else if hasMore && !items.isEmpty {
-                    Color.clear.frame(height: 30).onAppear { Task { await load(more: true) } }
                 }
-                Text("来源：\(source.note)").font(.caption2).foregroundStyle(STVTheme.secondary).padding(.horizontal, 16)
-            }.padding(.bottom, 24)
-        }
-        .scrollIndicators(.hidden)
-        .refreshable { await load(more: false) }
-        .background(embedded ? Color.clear : STVTheme.bg)
-        .navigationTitle(embedded ? "" : "漫画").navigationBarTitleDisplayMode(.inline)
-        .toolbar(embedded ? .hidden : .visible, for: .navigationBar)
-        .task(id: "\(source.rawValue)|\(category?.id ?? "")") { await load(more: false) }
-        .compatOnChange(of: sources) { now in if !now.contains(source) { category = nil; source = .baozi } }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("manga.home")
+            }
+        }.padding(.horizontal, 16)
     }
 
     private func reload() { Task { await load(more: false) } }
@@ -97,14 +121,16 @@ struct MangaHomeView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(store.recent.filter { !$0.item.source.isAdult || SourceGate.shared.showAdultManga }.prefix(10), id: \.item.id) { p in
-                        NavigationLink(value: Route.manga(p.item)) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                CoverView(url: p.item.cover, headers: p.item.source.provider.imageHeaders, corner: 8).frame(width: 84, height: 112)
-                                    .zoomSource("manga:" + p.item.id, ns)
-                                Text(p.item.title).font(.caption).lineLimit(1).foregroundStyle(STVTheme.text)
-                                Text(p.chapterTitle).font(.caption2).lineLimit(1).foregroundStyle(STVTheme.secondary)
-                            }.frame(width: 84)
-                        }.buttonStyle(.plain)
+                        WithPerceptionTracking {
+                            NavigationLink(value: Route.manga(p.item)) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    CoverView(url: p.item.cover, headers: p.item.source.provider.imageHeaders, corner: 8).frame(width: 84, height: 112)
+                                        .zoomSource("manga:" + p.item.id, ns)
+                                    Text(p.item.title).font(.caption).lineLimit(1).foregroundStyle(STVTheme.text)
+                                    Text(p.chapterTitle).font(.caption2).lineLimit(1).foregroundStyle(STVTheme.secondary)
+                                }.frame(width: 84)
+                            }.buttonStyle(.plain)
+                        }
                     }
                 }.padding(.horizontal, 16)
             }
@@ -116,44 +142,53 @@ struct MangaCell: View {
     @Environment(\.zoomNS) private var ns
     let item: MangaItem
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            CoverView(url: item.cover, headers: item.source.provider.imageHeaders, corner: 10).aspectRatio(3 / 4, contentMode: .fit)
-                .zoomSource("manga:" + item.id, ns)
-            Text(item.title).font(.caption.weight(.semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
-            Text(item.tags.prefix(2).joined(separator: " · ").isEmpty ? item.author : item.tags.prefix(2).joined(separator: " · "))
-                .font(.caption2).foregroundStyle(STVTheme.secondary).lineLimit(1)
+        WithPerceptionTracking {
+            VStack(alignment: .leading, spacing: 4) {
+                CoverView(url: item.cover, headers: item.source.provider.imageHeaders, corner: 10).aspectRatio(3 / 4, contentMode: .fit)
+                    .zoomSource("manga:" + item.id, ns)
+                Text(item.title).font(.caption.weight(.semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
+                Text(item.tags.prefix(2).joined(separator: " · ").isEmpty ? item.author : item.tags.prefix(2).joined(separator: " · "))
+                    .font(.caption2).foregroundStyle(STVTheme.secondary).lineLimit(1)
+            }
         }
     }
 }
 
 /// 书架: favorites + offline chapters.
 struct MangaLibraryView: View {
-    @Environment(\.layoutMetrics) private var layout
-    @ObservedObject private var store = MangaStore.shared
+    private let store = MangaStore.shared
     var body: some View {
-        List {
-            Section("收藏（\(store.favorites.count)）") {
-                ForEach(store.favorites.filter { !$0.source.isAdult || SourceGate.shared.showAdultManga }) { m in
-                    NavigationLink(value: Route.manga(m)) { Text(m.title) }
-                }
-            }
-            Section("已下载章节（\(store.offlineList.count)）") {
-                ForEach(store.offlineList.filter { !$0.item.source.isAdult || SourceGate.shared.showAdultManga }, id: \.chapter.id) { o in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(o.item.title).font(.subheadline)
-                            Text(o.chapter.title + " · " + (o.state == .done ? "\(o.files.count) 页" : o.state == .running ? "下载中 \(o.files.count)/\(o.total)" : (o.error ?? "失败")))
-                                .font(.caption).foregroundStyle(.secondary)
+        WithPerceptionTracking {
+            List {
+                WithPerceptionTracking {
+                    Section("收藏（\(store.favorites.count)）") {
+                        ForEach(store.favorites.filter { !$0.source.isAdult || SourceGate.shared.showAdultManga }) { m in
+                            WithPerceptionTracking {
+                                NavigationLink(value: Route.manga(m)) { Text(m.title) }
+                            }
                         }
-                        Spacer()
-                        Button(role: .destructive) { store.deleteOffline(o.item, o.chapter) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                    }
+                    Section("已下载章节（\(store.offlineList.count)）") {
+                        ForEach(store.offlineList.filter { !$0.item.source.isAdult || SourceGate.shared.showAdultManga }, id: \.chapter.id) { o in
+                            WithPerceptionTracking {
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(o.item.title).font(.subheadline)
+                                        Text(o.chapter.title + " · " + (o.state == .done ? "\(o.files.count) 页" : o.state == .running ? "下载中 \(o.files.count)/\(o.total)" : (o.error ?? "失败")))
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Button(role: .destructive) { store.deleteOffline(o.item, o.chapter) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                                }
+                            }
+                        }
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(STVTheme.bg.ignoresSafeArea())
+            .navigationTitle("书架").navigationBarTitleDisplayMode(.inline)
         }
-        .scrollContentBackground(.hidden)
-        .background(STVTheme.bg.ignoresSafeArea())
-        .navigationTitle("书架").navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -164,55 +199,62 @@ struct MangaDetailView: View {
     @State private var error: String?
     @State private var ascending = true
     @State private var reader: ReaderTarget?
-    @Environment(\.layoutMetrics) private var layout
-    @ObservedObject private var store = MangaStore.shared
+    private let store = MangaStore.shared
     private var provider: MangaProvider { MangaFixtures.provider ?? item.source.provider }
 
     struct ReaderTarget: Identifiable { let chapters: [MangaChapter]; let index: Int; let page: Int; var id: Int { index } }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 14) {
-                    CoverView(url: detail?.item.cover ?? item.cover, headers: provider.imageHeaders, corner: 10).frame(width: 110, height: 147)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(detail?.item.title ?? item.title).font(.title3.weight(.bold)).foregroundStyle(STVTheme.text)
-                        if let a = detail?.item.author ?? Optional(item.author), !a.isEmpty { Text(a).font(.subheadline).foregroundStyle(STVTheme.secondary) }
-                        Text(([detail?.status ?? ""] + (detail?.item.tags ?? item.tags)).filter { !$0.isEmpty }.prefix(5).joined(separator: " · "))
-                            .font(.caption).foregroundStyle(STVTheme.secondary)
-                        Text(item.source.label).font(.caption2).foregroundStyle(STVTheme.accent)
+        WithPerceptionTracking {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .top, spacing: 14) {
+                        CoverView(url: detail?.item.cover ?? item.cover, headers: provider.imageHeaders, corner: 10).frame(width: 110, height: 147)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(detail?.item.title ?? item.title).font(.title3.weight(.bold)).foregroundStyle(STVTheme.text)
+                            if let a = detail?.item.author ?? Optional(item.author), !a.isEmpty { Text(a).font(.subheadline).foregroundStyle(STVTheme.secondary) }
+                            Text(([detail?.status ?? ""] + (detail?.item.tags ?? item.tags)).filter { !$0.isEmpty }.prefix(5).joined(separator: " · "))
+                                .font(.caption).foregroundStyle(STVTheme.secondary)
+                            Text(item.source.label).font(.caption2).foregroundStyle(STVTheme.accent)
+                            HStack {
+                                Button { store.toggleFavorite(detail?.item ?? item) } label: {
+                                    Label(store.isFavorite(item) ? "已收藏" : "收藏", systemImage: store.isFavorite(item) ? "heart.fill" : "heart")
+                                }.buttonStyle(.bordered).tint(STVTheme.accent).accessibilityIdentifier("manga.favorite")
+                                if let d = detail, !d.chapters.isEmpty { readButton(d) }
+                            }.padding(.top, 4)
+                        }
+                    }
+                    if let d = detail, !d.desc.isEmpty { Text(d.desc).font(.footnote).foregroundStyle(STVTheme.secondary).lineLimit(6) }
+                    if let error { Text(error).font(.caption).foregroundStyle(STVTheme.accentWarm) }
+                    if let d = detail {
                         HStack {
-                            Button { store.toggleFavorite(detail?.item ?? item) } label: {
-                                Label(store.isFavorite(item) ? "已收藏" : "收藏", systemImage: store.isFavorite(item) ? "heart.fill" : "heart")
-                            }.buttonStyle(.bordered).tint(STVTheme.accent).accessibilityIdentifier("manga.favorite")
-                            if let d = detail, !d.chapters.isEmpty { readButton(d) }
-                        }.padding(.top, 4)
+                            Text("章节（\(d.chapters.count)）").font(.headline).foregroundStyle(STVTheme.text)
+                            Spacer()
+                            Button(ascending ? "正序" : "倒序") { ascending.toggle() }.font(.subheadline)
+                        }
+                        let list = ascending ? d.chapters : d.chapters.reversed()
+                        LazyVStack(spacing: 0) {
+                            WithPerceptionTracking {
+                                ForEach(list) { c in WithPerceptionTracking {
+                                    chapterRow(d, c)
+                                } }
+                            }
+                        }
+                    } else if error == nil {
+                        ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                     }
-                }
-                if let d = detail, !d.desc.isEmpty { Text(d.desc).font(.footnote).foregroundStyle(STVTheme.secondary).lineLimit(6) }
-                if let error { Text(error).font(.caption).foregroundStyle(STVTheme.accentWarm) }
-                if let d = detail {
-                    HStack {
-                        Text("章节（\(d.chapters.count)）").font(.headline).foregroundStyle(STVTheme.text)
-                        Spacer()
-                        Button(ascending ? "正序" : "倒序") { ascending.toggle() }.font(.subheadline)
-                    }
-                    let list = ascending ? d.chapters : d.chapters.reversed()
-                    LazyVStack(spacing: 0) {
-                        ForEach(list) { c in chapterRow(d, c) }
-                    }
-                } else if error == nil {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
-                }
-            }.padding(16)
+                }.padding(16)
+            }
+            .background(STVTheme.bg.ignoresSafeArea())
+            .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+            .zoomDestination("manga:" + item.id, ns)
+            .task {
+                do { detail = try await provider.detail(item) } catch { self.error = error.localizedDescription }
+            }
+            .fullScreenCover(item: $reader) { r in WithPerceptionTracking {
+                MangaReaderView(item: detail?.item ?? item, chapters: r.chapters, index: r.index, startPage: r.page)
+            } }
         }
-        .background(STVTheme.bg.ignoresSafeArea())
-        .navigationTitle("").navigationBarTitleDisplayMode(.inline)
-        .zoomDestination("manga:" + item.id, ns)
-        .task {
-            do { detail = try await provider.detail(item) } catch { self.error = error.localizedDescription }
-        }
-        .fullScreenCover(item: $reader) { r in MangaReaderView(item: detail?.item ?? item, chapters: r.chapters, index: r.index, startPage: r.page) }
     }
 
     @ViewBuilder private func readButton(_ d: MangaDetail) -> some View {
@@ -267,77 +309,87 @@ struct MangaReaderView: View {
     @State private var baseScale: CGFloat = 1
     @State private var visible: Set<Int> = []
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.layoutMetrics) private var layout
-    @ObservedObject private var store = MangaStore.shared
+    private let store = MangaStore.shared
     private var provider: MangaProvider { MangaFixtures.provider ?? item.source.provider }
     private var chapter: MangaChapter { chapters[index] }
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            if pages.isEmpty {
-                if let error { VStack(spacing: 12) { Text(error).foregroundStyle(.white); Button("重试") { Task { await load() } } } }
-                else { ProgressView().tint(.white) }
-            } else if vertical { verticalReader } else { pagedReader }
-            if chrome { overlay }
+        WithPerceptionTracking {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                if pages.isEmpty {
+                    if let error { VStack(spacing: 12) { Text(error).foregroundStyle(.white); Button("重试") { Task { await load() } } } }
+                    else { ProgressView().tint(.white) }
+                } else if vertical { verticalReader } else { pagedReader }
+                if chrome { overlay }
+            }
+            .statusBarHidden(!chrome)
+            .task(id: index) { await load() }
+            .onChangeCompat(of: page) { _, p in
+                store.record(item, chapter, page: p, of: pages.count)
+                preload(from: p)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("manga.reader")
+            .preferredColorScheme(.dark)
+            .onChangeCompat(of: vertical) { _, _ in visible = [] }
         }
-        .statusBarHidden(!chrome)
-        .task(id: index) { await load() }
-        .compatOnChange(of: page) { p in
-            store.record(item, chapter, page: p, of: pages.count)
-            preload(from: p)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("manga.reader")
-        .preferredColorScheme(.dark)
-        .compatOnChange(of: vertical) { visible = [] }
     }
 
     private var verticalReader: some View {
         ScrollViewReader { proxy in
             // Zoom = wider content (pages fit width × scale), so both axes scroll to every edge.
-            GeometryReader { geo in
-                ScrollView(scale > 1.01 ? [.vertical, .horizontal] : .vertical) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(pages.indices, id: \.self) { i in
-                            MangaPageImage(url: pages[i], headers: provider.imageHeaders)
-                                .id(i)
-                                // Current page = topmost page on screen.
-                                .onAppear { visible.insert(i); page = visible.min() ?? i }
-                                .onDisappear { visible.remove(i); if let m = visible.min() { page = m } }
-                                .accessibilityIdentifier("manga.page.\(i)")
+            WithPerceptionTracking {
+                GeometryReader { geo in
+                    WithPerceptionTracking {
+                        ScrollView(scale > 1.01 ? [.vertical, .horizontal] : .vertical) {
+                            LazyVStack(spacing: 0) {
+                                WithPerceptionTracking {
+                                    ForEach(pages.indices, id: \.self) { i in
+                                        WithPerceptionTracking {
+                                            MangaPageImage(url: pages[i], headers: provider.imageHeaders)
+                                                .id(i)
+                                                // Current page = topmost page on screen.
+                                                .onAppear { visible.insert(i); page = visible.min() ?? i }
+                                                .onDisappear { visible.remove(i); if let m = visible.min() { page = m } }
+                                                .accessibilityIdentifier("manga.page.\(i)")
+                                        }
+                                    }
+                                    chapterEnd
+                                }
+                            }
+                            .frame(width: geo.size.width * scale)
                         }
-                        chapterEnd
                     }
-                    .frame(width: geo.size.width * scale)
                 }
+                .gesture(MagnificationGesture().onChanged { scale = max(1, min(3, baseScale * $0)) }.onEnded { _ in baseScale = scale })
+                .onTapGesture(count: 2) { withAnimation { scale = scale > 1 ? 1 : 2; baseScale = scale } }
+                .onTapGesture { withAnimation { chrome.toggle() } }
+                .onAppear { let target = page; if target > 0 { proxy.scrollTo(target, anchor: .top) } }
             }
-            .gesture(MagnificationGesture().onChanged { scale = max(1, min(3, baseScale * $0)) }.onEnded { _ in baseScale = scale })
-            .onTapGesture(count: 2) { withAnimation { scale = scale > 1 ? 1 : 2; baseScale = scale } }
-            .onTapGesture { withAnimation { chrome.toggle() } }
-            .onAppear { let target = page; if target > 0 { proxy.scrollTo(target, anchor: .top) } }
         }
     }
 
     private var pagedReader: some View {
-        GeometryReader { geo in
-            TabView(selection: $page) {
-                ForEach(pages.indices, id: \.self) { i in
+        TabView(selection: $page) {
+            ForEach(pages.indices, id: \.self) { i in
+                WithPerceptionTracking {
                     ZoomableImage(url: pages[i], headers: provider.imageHeaders, zoomed: $zoomed).tag(i)
                         .accessibilityIdentifier("manga.page.\(i)")
                 }
-                chapterEnd.tag(pages.count)
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            // Zoomed: drags pan the image instead of turning the page (zoom out, or double tap, to page again).
-            .scrollDisabled(zoomed)
-            .onTapGesture(coordinateSpace: .local) { p in pagedTap(p, width: geo.size.width) }
+            chapterEnd.tag(pages.count)
         }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        // Zoomed: drags pan the image instead of turning the page (zoom out, or double tap, to page again).
+        .scrollDisabled(zoomed)
+        .onTapGesture(coordinateSpace: .global) { p in pagedTap(p) }
     }
 
     /// Paged mode tap zones: left third = previous page, right third = next (past the last page → next
     /// chapter), middle = show / hide the bar. Zoomed pages leave taps to the image.
-    private func pagedTap(_ p: CGPoint, width w: CGFloat) {
+    private func pagedTap(_ p: CGPoint) {
+        let w = UIScreen.main.bounds.width
         guard !zoomed, w > 0 else { withAnimation { chrome.toggle() }; return }
         let x = p.x / w
         if x < 1.0 / 3, page > 0 {
@@ -417,14 +469,16 @@ struct MangaPageImage: View {
     @State private var image: UIImage?
     @State private var failed = false
     var body: some View {
-        Group {
-            if let image { Image(uiImage: image).resizable().aspectRatio(image.size, contentMode: .fit) }
-            else if failed {
-                Button { failed = false; Task { await load() } } label: { Label("加载失败，点我重试", systemImage: "arrow.clockwise").foregroundStyle(.white.opacity(0.6)) }
-                    .frame(maxWidth: .infinity, minHeight: 300)
-            } else { ProgressView().tint(.white).frame(maxWidth: .infinity, minHeight: 420) }
+        WithPerceptionTracking {
+            Group {
+                if let image { Image(uiImage: image).resizable().aspectRatio(image.size, contentMode: .fit) }
+                else if failed {
+                    Button { failed = false; Task { await load() } } label: { Label("加载失败，点我重试", systemImage: "arrow.clockwise").foregroundStyle(.white.opacity(0.6)) }
+                        .frame(maxWidth: .infinity, minHeight: 300)
+                } else { ProgressView().tint(.white).frame(maxWidth: .infinity, minHeight: 420) }
+            }
+            .task(id: url) { await load() }
         }
-        .task(id: url) { await load() }
     }
     private func load() async {
         do { image = try await CoverStore.shared.image(url: url, headers: headers) } catch { failed = true }

@@ -1,3 +1,4 @@
+import Perception
 import UIKit
 import WebKit
 import CryptoKit
@@ -11,6 +12,7 @@ import SwiftUI
     static let shared = PluginCF()
     nonisolated static let timeout: TimeInterval = 20
     private var webs: [String: WKWebView] = [:]
+    private static var legacyStores: [String: WKWebsiteDataStore] = [:]
     private var policies: [String: DomainPolicy] = [:]
     private var inflight: [String: Task<Bool, Never>] = [:]
     private var failedAt: [String: Date] = [:]
@@ -26,7 +28,11 @@ import SwiftUI
         if #available(iOS 17.0, *) {
             cfg.websiteDataStore = WKWebsiteDataStore(forIdentifier: storeID(pluginID))
         } else {
-            cfg.websiteDataStore = .default()
+            // One isolated store per plugin, shared by hidden and visible verification views.
+            // iOS 16 has no named persistent stores: WebKit session data lasts until app exit.
+            let store = legacyStores[pluginID] ?? .nonPersistent()
+            legacyStores[pluginID] = store
+            cfg.websiteDataStore = store
         }
         let v = UIDevice.current.systemVersion.split(separator: ".").prefix(2).joined(separator: ".")
         cfg.applicationNameForUserAgent = "Version/\(v) Mobile/15E148 Safari/604.1"
@@ -39,6 +45,8 @@ import SwiftUI
         shared.webs[pluginID] = nil
         if #available(iOS 17.0, *) {
             try? await WKWebsiteDataStore.remove(forIdentifier: storeID(pluginID))
+        } else if let store = legacyStores.removeValue(forKey: pluginID) {
+            await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
         }
     }
 
@@ -147,22 +155,24 @@ struct PluginVerifySheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            PluginWebView(pluginID: pluginID, url: url)
-                .ignoresSafeArea(edges: .bottom)
-                .navigationTitle(url.host ?? "验证")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("完成") {
-                            Task {
-                                await PluginStore.shared.importWebCookies(pluginID)
-                                onDone(); dismiss()
+        WithPerceptionTracking {
+            NavigationStack {
+                PluginWebView(pluginID: pluginID, url: url)
+                    .ignoresSafeArea(edges: .bottom)
+                    .navigationTitle(url.host ?? "验证")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") {
+                                Task {
+                                    await PluginStore.shared.importWebCookies(pluginID)
+                                    onDone(); dismiss()
+                                }
                             }
                         }
+                        ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                     }
-                    ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-                }
+            }
         }
     }
 }

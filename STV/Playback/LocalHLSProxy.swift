@@ -13,9 +13,6 @@ import Network
 final class LocalHLSProxy: @unchecked Sendable {
     struct Route {
         var headers: [String: String]
-        /// Legado-only opt-in: reuse plugin transport's redirect/domain/private-address policy; never the shared cookie jar.
-        var guardedNet: PluginNet? = nil
-        var contentType: String? = nil
         /// SupJav disguises TS as images; other sites must not be touched (fMP4 etc.).
         var strip: Bool
         var prefetcher: Prefetcher?
@@ -24,6 +21,7 @@ final class LocalHLSProxy: @unchecked Sendable {
         /// TDLib video streamed while it downloads (`/tg/<file id>`).
         var td: TDStreamSession?
         /// 红果 CENC MP4: content key, and the per-range decryptor once the header is read (`prepareCENC`).
+        var playlistKey: Data?
         var cencKey: String?
         var cenc: CENCDecryptor.RangePlan?
         /// MP4 chunk size (CENC uses small chunks so the header and first frames arrive fast on slow links).
@@ -44,34 +42,16 @@ final class LocalHLSProxy: @unchecked Sendable {
         return URLSession(configuration: c)
     }()
 
-    /// Restricted source media route. Other existing playback routes keep their previous behavior.
-    /// Every manifest/key/segment/range/redirect is constrained to the resolved media host and public DNS.
-    func legadoURL(_ media:LegadoMedia)throws->String {
-        guard !media.headers.keys.contains(where:{["cookie","authorization"].contains($0.lowercased())}) else {
-            throw LegadoError.rule("此媒体需要登录凭证；当前安全播放不转发账户 Cookie/Authorization")
-        }
-        let url=try LegadoMedia.checkedURL(media.url.absoluteString)
-        let policy=DomainPolicy([url.host!])
-        let net=PluginNet(pluginID:"legado-media-"+UUID().uuidString,jar:PluginCookieJar(file:nil),policy:{policy},log:{_ in})
-        let ext=url.pathExtension.lowercased()
-        let kind=ext=="m3u8" ? "p.m3u8" : "v."+(["mp3","m4a","aac","mp4"].contains(ext) ? ext : "bin")
-        guard let local=register(url.absoluteString,headers:media.headers,strip:false,budget:0,kind:kind,strongToken:true),let token=Self.token(of:local) else{throw LegadoError.network("无法启动本机安全播放代理")}
-        lock.lock();routes[token]?.guardedNet=net;lock.unlock()
-        return local
-    }
-    private func data(for req:URLRequest,route:Route)async throws->(Data,URLResponse){
-        guard let net=route.guardedNet else{return try await session.data(for:req)}
-        if let url=req.url{_ = try LegadoMedia.checkedURL(url.absoluteString)}
-        return try await Task.detached(priority:.userInitiated){
-            let r=try net.perform(req)
-            guard let response=HTTPURLResponse(url:r.url,statusCode:r.status,httpVersion:nil,headerFields:r.headers) else{throw URLError(.badServerResponse)}
-            return(r.body,response as URLResponse)
-        }.value
-    }
-
     /// Proxy URL for an upstream m3u8 (nil if the listener can't start).
     func playlistURL(_ upstream: String, headers: [String: String], strip: Bool = true, budget: Int = 0) -> String? {
         register(upstream, headers: headers, strip: strip, budget: budget, kind: "p.m3u8")
+    }
+
+    func keyedPlaylistURL(_ upstream: String, headers: [String: String], key: Data) -> String? {
+        guard key.count == 16, let url = playlistURL(upstream, headers: headers, strip: false),
+              let token = Self.token(of: url) else { return nil }
+        lock.lock(); routes[token]?.playlistKey = key; lock.unlock()
+        return url
     }
 
     /// Proxy URL for a progressive MP4 (Range requests served chunk-wise from the prefetch cache).
@@ -138,9 +118,9 @@ final class LocalHLSProxy: @unchecked Sendable {
 
     func tdSession(_ token: String) -> TDStreamSession? { route(token)?.td }
 
-    private func register(_ upstream: String, headers: [String: String], strip: Bool, budget: Int, kind: String,strongToken:Bool=false) -> String? {
+    private func register(_ upstream: String, headers: [String: String], strip: Bool, budget: Int, kind: String) -> String? {
         guard let port = start() else { return nil }
-        let token = strongToken ? UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased() : String(UUID().uuidString.prefix(8)).lowercased()
+        let token = UUID().uuidString.lowercased()
         let pf = budget > 0 ? makePrefetcher(token, budget, headers, strip) : nil
         lock.lock()
         if routes.count > 64 { routes.values.forEach { $0.prefetcher?.stop() }; routes = [:] }
@@ -156,7 +136,7 @@ final class LocalHLSProxy: @unchecked Sendable {
             for (k, v) in headers { r.setValue(v, forHTTPHeaderField: k) }
             if r.value(forHTTPHeaderField: "User-Agent") == nil { r.setValue(SiteHTTP.userAgent, forHTTPHeaderField: "User-Agent") }
             if let rg = unit.range { r.setValue("bytes=\(rg.lowerBound)-\(rg.upperBound)", forHTTPHeaderField: "Range") }
-            let (d, resp) = try await session.data(for:r)
+            let (d, resp) = try await session.data(for: r)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
             guard (200..<300).contains(status) else { throw URLError(.badServerResponse) }
             if let rg = unit.range, status == 200, d.count > rg.count { // server ignored Range
@@ -206,7 +186,6 @@ final class LocalHLSProxy: @unchecked Sendable {
     func release(_ token: String) {
         lock.lock(); let r = routes.removeValue(forKey: token); lock.unlock()
         r?.prefetcher?.stop()
-        r?.guardedNet?.cancel()
         if r?.prefetcher != nil { PrefetchStore.shared.remove(token) }
         if let td = r?.td { Task { await td.cancel() } }
     }
@@ -273,6 +252,9 @@ final class LocalHLSProxy: @unchecked Sendable {
         #endif
         let comps = target.split(separator: "?", maxSplits: 1).map(String.init)
         let segs = comps[0].split(separator: "/").map(String.init)
+        if segs.count == 2, segs[1] == "key", let key = route(segs[0])?.playlistKey {
+            return reply(c, 200, "application/octet-stream", key)
+        }
         if segs.count == 2, segs[0] == "tg" {
             guard let td = route("tg-\(Self.tdFileId(segs[1]))")?.td else { return reply(c, 404, "text/plain", Data()) }
             return await serveTD(c, td, range: rangeHeader, head: parts[0] == "HEAD")
@@ -282,7 +264,7 @@ final class LocalHLSProxy: @unchecked Sendable {
               url.scheme == "https" || url.scheme == "http" else { return reply(c, 404, "text/plain", Data()) }
         guard let rt = route(segs[0]) else { return reply(c, 404, "text/plain", Data()) }
         let headers = rt.headers
-        if segs[1] == "v.mp4" || (rt.guardedNet != nil && segs[1].hasPrefix("v.")) { return await serveMP4(c, token: segs[0], url: url, route: rt, range: rangeHeader, head: parts[0] == "HEAD") }
+        if segs[1] == "v.mp4" { return await serveMP4(c, token: segs[0], url: url, route: rt, range: rangeHeader, head: parts[0] == "HEAD") }
         if segs[1] == "s.ts", let pf = rt.prefetcher {
             let unit = PrefetchUnit(key: PrefetchStore.key(upstream), url: url, range: nil, start: 0, duration: 0)
             do { return reply(c, 200, "video/mp2t", try await pf.data(for: unit.key, fallback: unit)) }
@@ -292,17 +274,17 @@ final class LocalHLSProxy: @unchecked Sendable {
         for (k, v) in headers { r.setValue(v, forHTTPHeaderField: k) }
         if r.value(forHTTPHeaderField: "User-Agent") == nil { r.setValue(SiteHTTP.userAgent, forHTTPHeaderField: "User-Agent") }
         do {
-            let (d, resp) = try await data(for:r,route:rt)
+            let (d, resp) = try await session.data(for: r)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
             guard (200..<300).contains(status) else { return reply(c, 502, "text/plain", Data("upstream \(status)".utf8)) }
             let final = resp.url ?? url
             switch segs[1] {
             case "p.m3u8":
-                let original = rt.guardedNet != nil ? String(decoding:d,as:UTF8.self) : HLSAdFilter.apply(String(decoding: d, as: UTF8.self), base: final)
+                let original = HLSAdFilter.apply(String(decoding: d, as: UTF8.self), base: final)
                 if let pf = rt.prefetcher, let units = HLSMedia.parse(original, base: final), units.allSatisfy({ $0.range == nil }) {
                     pf.setUnits(units)   // the variant AVPlayer actually chose
                 }
-                let text = try rewrite(original, base: final, token: segs[0],guarded:rt.guardedNet != nil)
+                let text = rewrite(original, base: final, token: segs[0])
                 reply(c, 200, "application/vnd.apple.mpegurl", Data(text.utf8))
             case "s.ts":
                 reply(c, 200, "video/mp2t", rt.strip ? Self.stripFakeHeader(d) : d)
@@ -346,14 +328,14 @@ final class LocalHLSProxy: @unchecked Sendable {
         // One retry: a single dropped probe would otherwise fail the whole item (-1008 "resource unavailable").
         var probe: (Data, URLResponse)?
         for attempt in 0..<2 where probe == nil {
-            do { probe = try await data(for:r,route:rt) }
+            do { probe = try await session.data(for: r) }
             catch { if attempt == 1 { throw error }; try? await Task.sleep(nanoseconds: 500_000_000) }
         }
         guard let h = probe?.1 as? HTTPURLResponse, (200..<300).contains(h.statusCode) else { throw URLError(.badServerResponse) }
         let total = (h.value(forHTTPHeaderField: "Content-Range")?.split(separator: "/").last).flatMap { Int($0) }
             ?? (h.statusCode == 200 ? Int(h.expectedContentLength) : nil)
         guard let total, total > 0 else { throw URLError(.cannotParseResponse) }
-        lock.lock(); routes[token]?.length = total;if rt.guardedNet != nil{routes[token]?.contentType=h.mimeType};lock.unlock()
+        lock.lock(); routes[token]?.length = total; lock.unlock()
         if let pf = rt.prefetcher {
             let chunk = rt.chunk
             let n = (total + chunk - 1) / chunk
@@ -383,7 +365,7 @@ final class LocalHLSProxy: @unchecked Sendable {
             do { first = try await mp4Chunk(token, url, rt, indices[0], total) }
             catch { return reply(c, 502, "text/plain", Data(error.localizedDescription.utf8)) }
         }
-        var out = "HTTP/1.1 \(partial ? "206 Partial Content" : "200 OK")\r\nContent-Type: \(route(token)?.contentType ?? "video/mp4")\r\nAccept-Ranges: bytes\r\n"
+        var out = "HTTP/1.1 \(partial ? "206 Partial Content" : "200 OK")\r\nContent-Type: video/mp4\r\nAccept-Ranges: bytes\r\n"
         out += "Content-Length: \(want.count)\r\n"
         if partial { out += "Content-Range: bytes \(want.lowerBound)-\(want.upperBound)/\(total)\r\n" }
         out += "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
@@ -421,7 +403,7 @@ final class LocalHLSProxy: @unchecked Sendable {
             try Task.checkCancellation()
             do {
                 if attempt == 0, let pf = route(token)?.prefetcher { return try await pf.data(for: key, fallback: unit) }
-                return try await fetchRange(url, lo...hi, rt.headers,guardedRoute:rt)
+                return try await fetchRange(url, lo...hi, rt.headers)
             } catch {
                 last = error
                 if attempt > 0 { try? await Task.sleep(nanoseconds: UInt64(attempt) * 400_000_000) }
@@ -462,13 +444,12 @@ final class LocalHLSProxy: @unchecked Sendable {
         c.cancel()
     }
 
-    private func fetchRange(_ url: URL, _ rg: ClosedRange<Int>, _ headers: [String: String],guardedRoute:Route?=nil) async throws -> Data {
+    private func fetchRange(_ url: URL, _ rg: ClosedRange<Int>, _ headers: [String: String]) async throws -> Data {
         var r = URLRequest(url: url)
         for (k, v) in headers { r.setValue(v, forHTTPHeaderField: k) }
         if r.value(forHTTPHeaderField: "User-Agent") == nil { r.setValue(SiteHTTP.userAgent, forHTTPHeaderField: "User-Agent") }
         r.setValue("bytes=\(rg.lowerBound)-\(rg.upperBound)", forHTTPHeaderField: "Range")
-        let (d, resp):(Data,URLResponse)
-        if let rt=guardedRoute{(d,resp)=try await data(for:r,route:rt)}else{(d,resp)=try await session.data(for:r)}
+        let (d, resp) = try await session.data(for: r)
         guard let h = resp as? HTTPURLResponse, (200..<300).contains(h.statusCode) else { throw URLError(.badServerResponse) }
         return h.statusCode == 200 && d.count > rg.count ? d.subdata(in: rg.lowerBound..<min(d.count, rg.upperBound + 1)) : d
     }
@@ -488,25 +469,21 @@ final class LocalHLSProxy: @unchecked Sendable {
 
     // MARK: Playlist rewrite
 
-    private func rewrite(_ pl: String, base: URL, token: String,guarded:Bool=false) throws -> String {
+    private func rewrite(_ pl: String, base: URL, token: String) -> String {
         func local(_ raw: String, _ kind: String) -> String {
             guard let u = URL(string: raw, relativeTo: base)?.absoluteURL else { return raw }
             return "http://127.0.0.1:\(port)/\(token)/\(kind)?u=\(Self.b64(u.absoluteString))"
         }
         var expectPlaylist = false
-        return try pl.split(separator: "\n", omittingEmptySubsequences: false).map { raw -> String in
+        return pl.split(separator: "\n", omittingEmptySubsequences: false).map { raw -> String in
             let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             let up = line.uppercased()
-            if guarded && (up.hasPrefix("#EXT-X-CONTENT-STEERING") || up.hasPrefix("#EXT-X-BYTERANGE") || up.contains("BYTERANGE=")) {throw LegadoError.rule("安全播放暂不支持此 HLS steering/byterange 扩展")}
-            if guarded && line.hasPrefix("#") && line.range(of:"URI\\s*=",options:[.regularExpression,.caseInsensitive]) != nil {
-                let supported=["#EXT-X-KEY:","#EXT-X-MAP:","#EXT-X-MEDIA:","#EXT-X-I-FRAME-STREAM-INF:","#EXT-X-SESSION-KEY:","#EXT-X-PRELOAD-HINT:","#EXT-X-RENDITION-REPORT:"]
-                guard supported.contains(where:up.hasPrefix),let regex=try? NSRegularExpression(pattern:"URI\\s*=\\s*\"([^\"]+)\"",options:.caseInsensitive),let match=regex.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)),let range=Range(match.range(at:1),in:line) else{throw LegadoError.rule("安全播放不支持此含外部资源的 HLS 标签")}
-                let kind=(up.hasPrefix("#EXT-X-MEDIA:") || up.hasPrefix("#EXT-X-I-FRAME") || up.hasPrefix("#EXT-X-RENDITION-REPORT:")) ? "p.m3u8" : "r"
-                return line.replacingCharacters(in:range,with:local(String(line[range]),kind))
-            }
             if up.hasPrefix("#EXT-X-STREAM-INF") { expectPlaylist = true; return line }
             if up.hasPrefix("#EXT-X-KEY") || up.hasPrefix("#EXT-X-MAP") || up.hasPrefix("#EXT-X-MEDIA") || up.hasPrefix("#EXT-X-I-FRAME-STREAM-INF") {
                 guard let m = HTML.groups("URI\\s*=\\s*\"([^\"]+)\"", line) else { return line }
+                if up.hasPrefix("#EXT-X-KEY:"), up.contains("METHOD=AES-128"), route(token)?.playlistKey != nil {
+                    return line.replacingOccurrences(of: m[1], with: "http://127.0.0.1:\(port)/\(token)/key")
+                }
                 let kind = up.hasPrefix("#EXT-X-MEDIA") || up.hasPrefix("#EXT-X-I-FRAME") ? "p.m3u8" : "r"
                 return line.replacingOccurrences(of: m[1], with: local(m[1], kind))
             }

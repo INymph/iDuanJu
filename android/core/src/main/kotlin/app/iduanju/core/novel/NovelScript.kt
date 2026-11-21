@@ -18,21 +18,6 @@ internal class NovelScript(private val source: NovelSource, private val base: St
         internal val bookURL = ThreadLocal<String?>()
         /** Raw body of the page being parsed (Legado's JS `src`). */
         internal val src = ThreadLocal<String?>()
-        internal val currentChapter = ThreadLocal<JSONObject?>()
-        internal val currentRSSArticle = ThreadLocal<JSONObject?>()
-        internal fun <T> withRSSArticle(article:JSONObject,block:()->T):T{
-            val old=currentRSSArticle.get();currentRSSArticle.set(article)
-            try{return block()}finally{currentRSSArticle.set(old)}
-        }
-        internal val nextChapterURL = ThreadLocal<String?>()
-        internal fun <T> withChapter(chapter:NovelChapter,next:String?=null,block:()->T):T {
-            val old=currentChapter.get();val oldNext=nextChapterURL.get()
-            currentChapter.set(JSONObject().put("title",chapter.title).put("url",chapter.url).put("index",chapter.index));nextChapterURL.set(next)
-            try{return block()}finally{currentChapter.set(old);nextChapterURL.set(oldNext)}
-        }
-        @Synchronized internal fun updateSourceState(source:String,key:String,transform:(String?)->String){
-            val scope="$source|$key";put(scope,transform(storage[scope]))
-        }
         private var stateFile: java.io.File? = null
         @Synchronized fun configure(root: java.io.File) {
             val file = java.io.File(root,"novel-script-state.json")
@@ -120,15 +105,7 @@ internal class NovelScript(private val source: NovelSource, private val base: St
         cx.evaluateString(scope, "var globalThis=this;\n" + compatible(prelude), "novel-host", 1, null)
         val initialExploreInfo=exploreInfo(source.id)
         val globals = "var source=${source.json}; __wrapSource(source); var baseUrl=${JSONObject.quote(base)}; var key=${JSONObject.quote(key)}; var page=$page; var book={bookUrl:${JSONObject.quote(bookURL.get().orEmpty())},getVariable:function(k){return java.get(k||'__bookVariable')}}; var result=${if (nodeList != null) "__nodeList(" + JSONArray(nodeList.map { handle(it) }) + ")" else jsonValue(result)}; var src=${JSONObject.quote(srcText ?: src.get().orEmpty())};"
-        // AnalyzeRule.evalJS upstream lines 837–840: nullable chapter/title/nextChapterUrl bindings.
-        val jsonCoercion=if(result is JSONObject || result is JSONArray) "if(result && typeof result==='object' && !Object.prototype.hasOwnProperty.call(result,'toString')){Object.defineProperty(result,'toString',{value:function(){return JSON.stringify(this)},enumerable:false,configurable:true})};\n" else ""
-        val chapterData=currentChapter.get()?.toString()?:"null"
-        val nextData=nextChapterURL.get()?.let{JSONObject.quote(it)}?:"null"
-        val chapterContext="var chapter=$chapterData;var title=chapter?chapter.title:null;var nextChapterUrl=$nextData;if(chapter){chapter.getTitle=function(){return this.title||''};chapter.getUrl=function(){return this.url||''};chapter.getIndex=function(){return this.index||0};}"
-
-        val rssData=currentRSSArticle.get()?.toString()?:"null"
-        val rssContext="var rssArticle=$rssData;if(rssArticle){Object.keys(rssArticle).forEach(function(k){rssArticle['get'+k.charAt(0).toUpperCase()+k.slice(1)]=function(){return this[k]}});rssArticle.getVariable=function(k){return java.get(k||'__rssArticleVariable')}};"
-        cx.evaluateString(scope, globals + jsonCoercion + chapterContext + rssContext + "var infoMap=" + initialExploreInfo.toString() + ";Object.defineProperties(infoMap,{get:{value:function(k){return Object.prototype.hasOwnProperty.call(this,k)?this[k]:null}},put:{value:function(k,v){var old=this[k];this[k]=String(v);return old==null?null:old}}});", "novel-context", 1, null)
+        cx.evaluateString(scope, globals + "var infoMap=" + initialExploreInfo.toString() + ";Object.defineProperties(infoMap,{get:{value:function(k){return Object.prototype.hasOwnProperty.call(this,k)?this[k]:null}},put:{value:function(k,v){var old=this[k];this[k]=String(v);return old==null?null:old}}});", "novel-context", 1, null)
         val lib = libraryCode(source.json.optString("jsLib"))
         if (lib.isNotBlank()) cx.evaluateString(scope, compatible(lib), "source-library", 1, null)
         val value = cx.evaluateString(scope, compatible(code), "source-rule", 1, null)

@@ -12,7 +12,7 @@ struct PlayerTech: Equatable {
     var audio = ""           // "AAC 2.0"
     var bitrate: Double = 0  // Mbps (indicated / estimated)
     var network: Double = 0  // bytes per second observed (0 = unknown / local file)
-    var engine = ""          // "Aether" / "AVPlayer"
+    var engine = ""          // "AVPlayer"
 
     static func channelLabel(_ channels: Int) -> String {
         channels >= 8 ? "7.1" : channels >= 6 ? "5.1" : channels == 1 ? "1.0" : channels > 0 ? "2.0" : ""
@@ -38,7 +38,7 @@ struct PlayerTech: Equatable {
     }
 
     static func resolutionLabel(_ size: CGSize) -> String {
-        let s = Int(min(size.width, size.height).rounded())
+        guard size.width.isFinite, size.height.isFinite, let s = Int(exactly: min(size.width, size.height).rounded()) else { return "" }
         guard s > 0 else { return "" }
         switch s {
         case 2000...: return "4K"
@@ -90,7 +90,7 @@ struct PlayerTech: Equatable {
             if at.mediaType == .video {
                 t.codec = codecName(CMFormatDescriptionGetMediaSubType(d))
                 let fps = track.currentVideoFrameRate > 0 ? track.currentVideoFrameRate : ((try? await at.load(.nominalFrameRate)) ?? 0)
-                t.fps = Int(fps.rounded())
+                t.fps = Int(exactly: fps.rounded()) ?? 0
                 if let tf = CMFormatDescriptionGetExtension(d, extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String,
                    tf == (kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ as String) || tf == (kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String) {
                     t.hdr = true

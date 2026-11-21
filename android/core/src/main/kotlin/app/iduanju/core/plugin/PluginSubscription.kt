@@ -31,13 +31,6 @@ data class PluginSubscription(
         /** Parses a fetched list (throws on non-object JSON). */
         fun apply(text: String, url: String, now: Long = System.currentTimeMillis()): PluginSubscription {
             val o = runCatching { JSONObject(text) }.getOrElse { throw PluginException("E_INSTALL", "订阅不是 JSON 对象") }
-            // Never replace a valid cached list with a foreign format parsed as empty success.
-            if (o.has("sites") || o.has("spider") || o.has("lives"))
-                throw PluginException("E_INSTALL", "这是 TVBox 配置，不是 idj1 订阅；不支持直接运行 JAR / CatVod / Python 源")
-            if (o.optJSONArray("plugins") == null && o.optJSONArray("cms") == null)
-                throw PluginException("E_INSTALL", "不是 idj1 订阅（需要 plugins 或 cms 数组）；阅读 RSS 规则不能直接导入")
-            for (key in listOf("plugins", "cms")) if (o.has(key) && o.optJSONArray(key) == null)
-                throw PluginException("E_INSTALL", "订阅字段 $key 必须是数组")
             val base = java.net.URI(url)
             val host = base.host ?: "订阅"
             val entries = (o.optJSONArray("plugins") ?: JSONArray()).let { a -> (0 until a.length()).mapNotNull { i ->

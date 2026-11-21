@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import WebKit
 
@@ -25,29 +26,31 @@ struct SiteVerifySheet: View {
     private var host: String { URL(string: target.url)?.host ?? "" }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Image(systemName: passed ? "checkmark.seal.fill" : "shield.lefthalf.filled")
-                        .foregroundStyle(passed ? STVTheme.accent : STVTheme.accentWarm)
-                    Text(status).font(.footnote).foregroundStyle(STVTheme.secondary)
-                    Spacer()
+        WithPerceptionTracking {
+            NavigationStack {
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        Image(systemName: passed ? "checkmark.seal.fill" : "shield.lefthalf.filled")
+                            .foregroundStyle(passed ? STVTheme.accent : STVTheme.accentWarm)
+                        Text(status).font(.footnote).foregroundStyle(STVTheme.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(STVTheme.surface)
+                    VerifyWebView(url: URL(string: target.url)) { snap in handle(snap) }
                 }
-                .padding(.horizontal, 16).padding(.vertical, 10)
-                .background(STVTheme.surface)
-                VerifyWebView(url: URL(string: target.url)) { snap in handle(snap) }
-            }
-            .navigationTitle("\(target.source.label) 站点验证")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { Task { await finish(last, force: true) } }.disabled(busy)
+                .navigationTitle("\(target.source.label) 站点验证")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { Task { await finish(last, force: true) } }.disabled(busy)
+                    }
                 }
             }
+            .presentationBackgroundCompat(STVTheme.bg)
+            .onAppear { SiteLog.add("[\(target.source.label)] 打开验证页 \(target.url)") }
         }
-        .compatPresentationBackground(STVTheme.bg)
-        .onAppear { SiteLog.add("[\(target.source.label)] 打开验证页 \(target.url)") }
     }
 
     private func clearance(_ s: VerifySnapshot?) -> String? {

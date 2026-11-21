@@ -84,11 +84,6 @@ data class HuangguoChannel(val sub: HuangguoSub, val slug: String, val title: St
 class HuangguoClient(private val dir: File? = null, private val prefs: MutableMap<String, String> = ConcurrentHashMap(),
                      private val cfCookies: okhttp3.CookieJar = okhttp3.CookieJar.NO_COOKIES) {
     companion object {
-        /** Landing-page HTML is not evidence of a working AI catalog endpoint. */
-        fun isAICatalogResponse(status:Int,body:String):Boolean = status==200 && runCatching {
-            JSONObject(body).optJSONObject("data")?.optJSONArray("items")!=null
-        }.getOrDefault(false)
-
         const val UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1"
         val aiMirrors = listOf("https://00b4b.adihsppe.cc", "https://bsl8m.adihsppe.cc", "https://hgai12.com", "https://brma.adihsppe.cc", "https://mzofzp.adihsppe.cc",
             "https://rpb7bz.adihsppe.cc", "https://v2tg.adihsppe.cc", "https://huangguoai.com", "https://huangguoai.io", "https://huangguoai.me", "https://huangguoai.ai",
@@ -216,21 +211,11 @@ class HuangguoClient(private val dir: File? = null, private val prefs: MutableMa
     fun discoveredMirrors(html: String): List<String> =
         HGHtml.all("https://((?:[a-z0-9-]+\\.)?(?:adihsppe\\.cc|huangguoai\\.(?:com|io|me|ai)|hgai\\d*\\.com))(?=[/\"'\\s<])", html).map { "https://" + it[1] }.distinct()
     private fun probe(m: String): String? = runCatching {
-        if (fixture != null) {
-            val root=fixture!!.invoke("$m/").orEmpty()
-            val json=fixture!!.invoke("$m/api/videos/category/ai-duanju?sort=hot&page=1&size=1").orEmpty()
-            return m.takeIf { root.contains("hg-drama-card") && isAICatalogResponse(200,json) }
-        }
+        if (fixture != null) return fixture!!.invoke("$m/")?.takeIf { it.contains("hg-drama-card") }?.let { m }
         probeHttp.newCall(Request.Builder().url("$m/").header("User-Agent", UA).build()).execute().use { r ->
             val body = r.body?.string() ?: ""
             if (r.code != 200 || !(body.contains("hg-drama-card") || body.contains("videoInitialData") || body.contains("/ai-duanju/"))) null
-            else {
-                val base=r.request.url.let { "${it.scheme}://${it.host}" }
-                probeHttp.newCall(Request.Builder().url("$base/api/videos/category/ai-duanju?sort=hot&page=1&size=1").header("User-Agent",UA).header("Referer","$base/").build()).execute().use { api ->
-                    if(!isAICatalogResponse(api.code,api.body?.string().orEmpty())) null
-                    else api.request.url.let { "${it.scheme}://${it.host}" }
-                }
-            }
+            else r.request.url.let { "${it.scheme}://${it.host}" }
         }
     }.getOrNull()
     @Synchronized fun ensureAIBase(): String {

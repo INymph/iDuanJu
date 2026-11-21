@@ -30,10 +30,6 @@ class CMSStore(ctx: Context) {
     fun add(name: String, apiRaw: String, adult: Boolean, origin: String = "manual"): CMSSite {
         val api = MacCMS.normalize(apiRaw)
         val cats = MacCMS.fetchCategories(api)
-        return saveValidated(name, api, adult, origin, cats)
-    }
-
-    fun saveValidated(name: String, api: String, adult: Boolean, origin: String, cats: List<CMSCategory>): CMSSite {
         val host = runCatching { java.net.URI(api).host }.getOrNull() ?: "采集站"
         var s = CMSSite(CMSSite.key(api), name.ifBlank { host }, api, adult, true, cats, origin)
         val i = sites.indexOfFirst { it.key == s.key }

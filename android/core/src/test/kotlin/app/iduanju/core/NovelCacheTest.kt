@@ -26,8 +26,7 @@ class NovelCacheTest {
             assertEquals(1,fresh.count("sourceA",book.url,toc))
             assertEquals("第二章正文",fresh.read("sourceA",book.url,toc.reversed()[0].url))
             assertNull(fresh.read("sourceB",book.url,toc[1].url))
-            assertEquals(toc.mapIndexed{i,ch->ch.copy(index=i)},fresh.books().single().chapters)
-            assertEquals(listOf(0,1),fresh.books().single().chapters.map{it.index})
+            assertEquals(toc,fresh.books().single().chapters)
             assertThrows(Exception::class.java) { cache.save("sourceA",book.url,toc[0].url,"") }
         } finally { dir.deleteRecursively() }
     }

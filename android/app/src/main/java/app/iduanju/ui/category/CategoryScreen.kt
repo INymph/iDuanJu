@@ -155,15 +155,15 @@ fun CategoryScreen(onOpenDetail: (String) -> Unit) {
     val picks = panel?.rows?.mapNotNull { r -> selected[r.type]?.takeIf { it.isNotEmpty() }?.let { id -> r.type to (r.items.firstOrNull { it.id == id }?.name ?: names[r.type] ?: "") } }?.filter { it.second.isNotEmpty() } ?: emptyList()
 
     DSPage(glow = !scrolled) {
-        LazyVerticalGrid(GridCells.Fixed(app.iduanju.ui.components.LocalLayoutMetrics.current.posterCols), Modifier.fillMaxSize().statusBarsPadding(), state = grid,
+        LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize().statusBarsPadding(), state = grid,
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 110.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
-            item(span = { GridItemSpan(maxLineSpan) }, key = "tabs") {
+            item(span = { GridItemSpan(3) }, key = "tabs") {
                 UnderlineTabs(listOf(false, true), filterMode, { if (it) "筛选找片" else "榜单" }, onSelect = { if (it != filterMode) filterMode = it },
                     modifier = Modifier.padding(start = 4.dp))
             }
             if (!filterMode) {
-                item(span = { GridItemSpan(maxLineSpan) }, key = "rankhead") {
+                item(span = { GridItemSpan(3) }, key = "rankhead") {
                     Column {
                         SegmentedTabs(HGRankGenre.entries, genre, { it.label }, { genre = it }, Modifier.padding(top = 22.dp))
                         ChipRow(genre.subs, sub, { it.label }, { sub = it }, start = 0.dp, modifier = Modifier.padding(top = 12.dp))
@@ -171,14 +171,14 @@ fun CategoryScreen(onOpenDetail: (String) -> Unit) {
                     }
                 }
                 itemsIndexed(items.take(3), key = { _, s -> "top" + s.seriesId }) { i, s -> PosterCell(s, i + 1, onOpen = onOpenDetail) }
-                itemsIndexed(items.drop(3), key = { _, s -> s.seriesId }, span = { _, _ -> GridItemSpan(maxLineSpan) }) { i, s ->
+                itemsIndexed(items.drop(3), key = { _, s -> s.seriesId }, span = { _, _ -> GridItemSpan(3) }) { i, s ->
                     Column(Modifier.padding(top = if (i == 0) 12.dp else 0.dp)) {
                         if (i > 0) Hairline()
                         RankRow(s, i + 4, onOpenDetail)
                     }
                 }
             } else {
-                item(span = { GridItemSpan(maxLineSpan) }, key = "panel") {
+                item(span = { GridItemSpan(3) }, key = "panel") {
                     Box(Modifier.padding(top = 22.dp, bottom = 16.dp)) {
                         val p = panel
                         when {
@@ -190,7 +190,7 @@ fun CategoryScreen(onOpenDetail: (String) -> Unit) {
                 }
                 itemsIndexed(items, key = { _, s -> s.seriesId }) { _, s -> PosterCell(s, null, HomeFmt.meta(s), onOpenDetail, Modifier.padding(bottom = 16.dp)) }
             }
-            item(span = { GridItemSpan(maxLineSpan) }, key = "footer") {
+            item(span = { GridItemSpan(3) }, key = "footer") {
                 Box(Modifier.fillMaxWidth().padding(vertical = 18.dp), contentAlignment = Alignment.Center) {
                     when {
                         loading -> CircularProgressIndicator(color = c.secondary, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))

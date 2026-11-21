@@ -45,11 +45,6 @@ enum DebugPlugins {
             for s in CMSStore.shared.sites { CMSStore.shared.remove(s.key) }
             for s in store.subscriptions { store.removeSubscription(s.url) }
         }
-        // DEBUG-only local test bundle; still passes the ordinary integrity / sandbox installer.
-        if let path = env["STV_PLUGIN_FILE"] {
-            do { try store.commit(try PluginInstaller.prepare(bundle: Data(contentsOf: URL(fileURLWithPath: path)), origin: "debug-local-test")) }
-            catch { NSLog("[DebugPlugins] local test import: \(error)") }
-        }
         if env["STV_PLUGINS"] == "bundled" {
             let adult = env["STV_PLUGINS_ADULT"] == "1"
             for b in PluginInstaller.bundled() where adult || !b.manifest.adult {

@@ -21,9 +21,6 @@ data class HGEpisode(val ep: Int, val vid: String, val duration: Int = 0, val ti
 
 data class HGCelebrity(val id: String = "", val name: String = "", val avatar: String = "", val role: String = "", val intro: String = "")
 
-data class HGActorProfile(val actor: HGCelebrity, val related: List<HGCelebrity>)
-data class HGActorWorks(val items: List<HGSeries>, val total: Int)
-
 data class HGSeriesDetail(
     var seriesId: String = "",
     var title: String = "",

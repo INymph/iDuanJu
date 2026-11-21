@@ -1,10 +1,5 @@
 package app.iduanju.manga
 
-import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -32,8 +27,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -56,41 +49,6 @@ private fun Cover(url: String, headers: Map<String, String>, mod: Modifier, corn
     val ctx = LocalContext.current
     val req = remember(url) { ImageRequest.Builder(ctx).data(url).apply { headers.forEach { (k, v) -> addHeader(k, v) } }.crossfade(true).build() }
     AsyncImage(req, null, mod.clip(RoundedCornerShape(corner.dp)).background(IdjThemeColors.elevated), contentScale = ContentScale.Crop)
-}
-
-/** Screen-local source strip: labels never consume the next source's width or grow into the catalog.
- * Keep GlassChip elsewhere unchanged. Full labels remain available to accessibility despite ellipsis. */
-@Composable
-internal fun MangaSourceStrip(
-    sources: List<Pair<String, String>>,
-    selected: String,
-    onSelected: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val c = IdjThemeColors
-    Row(
-        modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup().testTag("manga.source.strip"),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        sources.forEach { (id, label) ->
-            val active = id == selected
-            Box(
-                Modifier.widthIn(min = 48.dp, max = 240.dp).heightIn(min = 48.dp)
-                    .clip(CircleShape)
-                    .background(if (active) c.text else c.elevated)
-                    .then(if (!active) Modifier.border(0.6.dp, c.text.copy(0.12f), CircleShape) else Modifier)
-                    .selectable(active, role = Role.Tab, onClick = { onSelected(id) })
-                    .testTag("manga.source." + id)
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(label, color = if (active) c.bg else c.secondary, fontSize = 14.sp,
-                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
 }
 
 /** 「漫画」 home page (iOS MangaHomeView, embedded): source chips, search, categories, 继续阅读, 3-column grid. */
@@ -121,13 +79,11 @@ fun MangaHomePage(onOpen: (String) -> Unit) {
     val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= grid.layoutInfo.totalItemsCount - 6 } }
     LaunchedEffect(nearEnd, items.size) { if (nearEnd && items.isNotEmpty()) more() }
 
-    LazyVerticalGrid(GridCells.Fixed(app.iduanju.ui.components.LocalLayoutMetrics.current.posterCols), state = grid, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp),
+    LazyVerticalGrid(GridCells.Fixed(3), state = grid, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item(span = { GridItemSpan(maxLineSpan) }) {
+        item(span = { GridItemSpan(3) }) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 6.dp)) {
-                MangaSourceStrip(store.providers.map { it.source to it.label }, source, { next ->
-                    if (next != source) { source = next; searching = null; query = "" }
-                })
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { store.providers.forEach { s -> GlassChip(s.label, s.source == source) { if (s.source != source) { source = s.source; searching = null; query = "" } } } }
                 Row(Modifier.fillMaxWidth().height(40.dp).clip(CircleShape).background(c.elevated).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Search, null, tint = c.secondary, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
                     Box(Modifier.weight(1f)) {
@@ -154,13 +110,13 @@ fun MangaHomePage(onOpen: (String) -> Unit) {
             }
         }
         items(items, key = { it.id }) { m ->
-            Column(Modifier.testTag("manga.cell." + m.id).clickable { onOpen(store.put(m)) }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.clickable { onOpen(store.put(m)) }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Cover(m.cover, p.imageHeaders, Modifier.fillMaxWidth().aspectRatio(3f / 4))
                 Text(m.title, color = c.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(m.tags.take(2).joinToString(" · ").ifEmpty { m.author }, color = c.secondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        item(span = { GridItemSpan(maxLineSpan) }) {
+        item(span = { GridItemSpan(3) }) {
             Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 when { loading -> CircularProgressIndicator(color = c.secondary, strokeWidth = 2.dp, modifier = Modifier.size(22.dp)); error != null -> Text(error!!, color = c.accentWarm, fontSize = 12.sp) }
                 Text("来源：${p.note}", color = c.secondary, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))

@@ -110,23 +110,17 @@ internal fun NovelReaderScreen(
     }}
     LaunchedEffect(autoTurn,settings.turn){if(autoTurn&&settings.turn!="scroll")while(isActive){delay(8000);pageView?.next()}}
     BackHandler{if(menu)closeMenu() else onBack()}
-    val layoutMetrics = app.iduanju.ui.components.LocalLayoutMetrics.current
-    val readerModifier = if (layoutMetrics.readerMaxWidth != androidx.compose.ui.unit.Dp.Unspecified) {
-        Modifier.widthIn(max = layoutMetrics.readerMaxWidth).fillMaxHeight()
-    } else {
-        Modifier.fillMaxSize()
-    }
-    Box(Modifier.fillMaxSize().background(bg).testTag("novel.reader"), contentAlignment = Alignment.TopCenter) {
+    Box(Modifier.fillMaxSize().background(bg).testTag("novel.reader")) {
         // Capture safe geometry once. System-bar visibility must not reflow or translate text.
         val contentPadding=with(density){PaddingValues(top=stableTop.toDp(),bottom=stableBottom.toDp())}
-        if(settings.turn!="scroll")AndroidView(factory={NovelPageView(it).also{v->pageView=v}},modifier=readerModifier.padding(contentPadding).testTag("novel.page").semantics{contentDescription=chapters.getOrNull(chapterIndex)?.title.orEmpty()+"\n"+body},update={v->
+        if(settings.turn!="scroll")AndroidView(factory={NovelPageView(it).also{v->pageView=v}},modifier=Modifier.fillMaxSize().padding(contentPadding).testTag("novel.page").semantics{contentDescription=chapters.getOrNull(chapterIndex)?.title.orEmpty()+"\n"+body},update={v->
             v.onMenu={menu=!menu;if(!menu)tab=""};v.enabledTurns=!busy
             v.onEdge={d->val next=chapterIndex+d;if(next in chapters.indices){endChapter=if(d<0)next else -1;onChapter(next)}}
             v.onPosition={offset,p,n->lastChapter=chapterIndex.coerceAtLeast(0);lastOffset=offset;page=p;pages=n;onPosition(chapterIndex.coerceAtLeast(0),offset)}
             v.update(bookKey+"|"+chapterIndex+"|"+fontRevision,body,chapters.getOrNull(chapterIndex)?.title.orEmpty(),settings,if(jumpTarget?.first==chapterIndex)jumpTarget!!.second else if(endChapter==chapterIndex)Int.MAX_VALUE else if(lastChapter==chapterIndex)lastOffset else initialOffset)
             if(jumpTarget?.first==chapterIndex)jumpTarget=null
         }) else {
-            Box(readerModifier.padding(contentPadding)) {
+            Box(Modifier.fillMaxSize().padding(contentPadding)) {
                 LazyColumn(state=scrollState,modifier=Modifier.fillMaxSize().testTag("novel.scroll").pointerInput(menu){detectTapGestures{p->if(p.x<size.width/3f)scope.launch{scrollState.animateScrollBy(-size.height*.85f)} else if(p.x>size.width*2/3f)scope.launch{scrollState.animateScrollBy(size.height*.85f)} else if(menu)closeMenu() else menu=true}},contentPadding=PaddingValues(start=(12+28*settings.margin).dp,end=(12+28*settings.margin).dp,top=32.dp,bottom=30.dp)) {
                     items(maxOf(1,chapters.size),key={chapters.getOrNull(it)?.url?:"local"}){i->
                         LaunchedEffect(bookKey,i){if(i !in texts)try{texts[i]=onLoadChapter(i)}catch(e:CancellationException){throw e}catch(e:Exception){textErrors[i]=e.message?:"章节读取失败"}}

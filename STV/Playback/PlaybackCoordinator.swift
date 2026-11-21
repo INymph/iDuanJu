@@ -1,23 +1,14 @@
 import AVFoundation
 import AVKit
 import MediaPlayer
-import Combine
+import Perception
 import UIKit
 
-/// Drives the vertical episode feed: one playback core (MPVKit by default, AVPlayer as the
-/// fallback — see `PlayerEngine`), per-episode prepared sources, neighbour preloading, resume and
-/// local progress persistence.
-@MainActor
-final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureControllerDelegate, ObservableObject {
+/// Drives AVPlayer, prepared sources, neighbour preloading and persisted progress.
+@MainActor @Perceptible
+final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureControllerDelegate {
     /// `.remote`: upstream MP4 played by AVFoundation directly (proxy fallback).
     enum Source { case file(URL), stream(HLSPlayback, String), direct(URL), remote(URL, [String: String]) }
-
-    private static func mp4AssetOptions(headers: [String: String] = [:]) -> [String: Any]? {
-        var o: [String: Any] = [:]
-        if #available(iOS 17.0, *) { o[AVURLAssetOverrideMIMETypeKey] = "video/mp4" }
-        if !headers.isEmpty { o["AVURLAssetHTTPHeaderFieldsKey"] = headers }
-        return o.isEmpty ? nil : o
-    }
 
     /// AVPlayerItem for a source. Progressive MP4s get an explicit out-of-band MIME type so AVFoundation
     /// never has to guess the container from an extensionless / query-string URL.
@@ -26,9 +17,11 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         case .file(let u): return AVPlayerItem(url: u)
         case .direct(let u):
             let mp4 = u.path.hasSuffix(".mp4") || u.path.hasPrefix("/tg/")
-            return AVPlayerItem(asset: AVURLAsset(url: u, options: mp4 ? mp4AssetOptions() : nil))
+            return AVPlayerItem(asset: AVURLAsset(url: u, options: mp4 ? ["AVURLAssetOverrideMIMETypeKey": "video/mp4"] : nil))
         case .remote(let u, let headers):
-            return AVPlayerItem(asset: AVURLAsset(url: u, options: mp4AssetOptions(headers: headers)))
+            var o: [String: Any] = ["AVURLAssetOverrideMIMETypeKey": "video/mp4"]
+            if !headers.isEmpty { o["AVURLAssetHTTPHeaderFieldsKey"] = headers }
+            return AVPlayerItem(asset: AVURLAsset(url: u, options: o))
         case .stream(let loader, let url):
             return loader.makeAsset(url: url).map { AVPlayerItem(asset: $0) }
         }
@@ -53,18 +46,18 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     static let rateSteps: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
 
     let series: HGSeries
-    @Published var detail: HGSeriesDetail?
-    @Published private(set) var current: Int?
-    @Published private(set) var readyIndex: Int?
-    @Published private(set) var errors: [Int: String] = [:]
+    var detail: HGSeriesDetail?
+    private(set) var current: Int?
+    private(set) var readyIndex: Int?
+    private(set) var errors: [Int: String] = [:]
     /// Set when an episode failed on a Cloudflare interstitial (player shows 去验证).
-    @Published private(set) var verifyTargets: [Int: VerifyTarget] = [:]
-    @Published private(set) var streams: [Int: [HGStream]] = [:]
-    @Published private(set) var chosen: [Int: HGStream] = [:]
-    @Published var time: Double = 0
-    @Published var duration: Double = 0
+    private(set) var verifyTargets: [Int: VerifyTarget] = [:]
+    private(set) var streams: [Int: [HGStream]] = [:]
+    private(set) var chosen: [Int: HGStream] = [:]
+    var time: Double = 0
+    var duration: Double = 0
     /// Furthest playable position buffered by AVPlayer around the playhead (seconds).
-    @Published private(set) var loadedUntil: Double = 0
+    private(set) var loadedUntil: Double = 0
     /// Buffered position for the progress bar: AVPlayer buffer or the byte pre-buffer, whichever is ahead.
     var bufferedUntil: Double { max(loadedUntil, prebuffer?.until ?? 0) }
     /// User intent survives buffering, episode replacement and system interruptions.
@@ -72,59 +65,49 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     private var transportPaused = false
     var paused: Bool { !wantsPlayback || interrupted || transportPaused || current.flatMap { errors[$0] } != nil }
     /// Active playback rate (1.0 default). Locked rate persists after speed-gesture ends.
-    @Published private(set) var playbackRate: Double = 1.0
+    private(set) var playbackRate: Double = 1.0
     /// Non-nil when user locked a non-1x rate via speed gesture.
-    @Published private(set) var lockedRate: Double? = nil
-    @Published private(set) var pipPossible = false
+    private(set) var lockedRate: Double? = nil
+    private(set) var pipPossible = false
     /// Design v3 chrome: rendered video size, tech strip, audio / subtitle options, auto-advance.
-    @Published private(set) var videoSize: CGSize = .zero
-    @Published private(set) var tech: PlayerTech?
-    @Published private(set) var audioOptions: [MediaTrack] = []
-    @Published private(set) var subtitleOptions: [MediaTrack] = []
-    @Published private(set) var audioSelected: Int?
-    @Published private(set) var subtitleSelected: Int?
-    /// Host-drawn subtitle line (Aether loopback / software routes).
-    @Published private(set) var subtitleText: String?
+    private(set) var videoSize: CGSize = .zero
+    private(set) var tech: PlayerTech?
+    private(set) var audioOptions: [MediaTrack] = []
+    private(set) var subtitleOptions: [MediaTrack] = []
+    private(set) var audioSelected: Int?
+    private(set) var subtitleSelected: Int?
+    /// Optional host-drawn subtitle line; native tracks are rendered by AVPlayer.
+    private(set) var subtitleText: String?
     /// Core playing the current episode (the view mounts its surface).
-    @Published private(set) var engineKind: PlayerEngineKind = .avplayer
-    @Published private(set) var muted = false
-    @Published var autoNext: Bool = UserDefaults.standard.object(forKey: "stv.player.autoNext") as? Bool ?? true {
+    private(set) var engineKind: PlayerEngineKind = .avplayer
+    private(set) var muted = false
+    var autoNext: Bool = UserDefaults.standard.object(forKey: "stv.player.autoNext") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoNext, forKey: "stv.player.autoNext") }
     }
-    let thumbnails = PlayerThumbnailer()
+    @PerceptionIgnored let thumbnails = PlayerThumbnailer()
     /// Time under the finger while the progress bar is dragged (time row follows it).
-    @Published var scrubPreview: Double?
+    var scrubPreview: Double?
     #if DEBUG
     /// Screenshot hook: frozen drag fraction (STV_SCRUB_DEMO), shared by whichever bar instance is on screen.
-    @Published var scrubDemo: Double?
+    var scrubDemo: Double?
     #endif
-    private var lastTech = Date.distantPast
+    @PerceptionIgnored private var lastTech = Date.distantPast
     /// Long-video byte pre-buffer: bytes cached ahead of the playhead and the time the contiguous run reaches.
-    @Published private(set) var prebuffer: (bytes: Int, until: Double, lowStorage: Bool)?
-    private var prefetchTokens: [Int: String] = [:]
+    private(set) var prebuffer: (bytes: Int, until: Double, lowStorage: Bool)?
+    @PerceptionIgnored private var prefetchTokens: [Int: String] = [:]
     /// Episodes whose proxied playback failed once → played straight from the CDN.
-    private var bypassProxy: Set<Int> = []
-    private var lastPrefetchPoll = Date.distantPast
+    @PerceptionIgnored private var bypassProxy: Set<Int> = []
+    @PerceptionIgnored private var lastPrefetchPoll = Date.distantPast
 
-    let av: AVPlayerEngine
-    private(set) lazy var mpv: MPVPlayerEngine? = {
-        do { return try MPVPlayerEngine() } catch {
-            #if DEBUG
-            NSLog("%@", "[STV] MPVKit unavailable: \(error)")
-            #endif
-            return nil
-        }
-    }()
-    private(set) var engine: PlayerEngine
-    /// Episodes MPVKit could not open → AVPlayer.
-    private var mpvFailed: Set<Int> = []
-    private var pipIdentity: ObjectIdentifier?
-    private var timer: Timer?
-    private var sharedCommandsRegistered = false
+    @PerceptionIgnored let av: AVPlayerEngine
+    @PerceptionIgnored private(set) var engine: PlayerEngine
+    @PerceptionIgnored private var pipIdentity: ObjectIdentifier?
+    @PerceptionIgnored private var timer: Timer?
+    @PerceptionIgnored private var sharedCommandsRegistered = false
     /// Aspect fill (view toggle) applied to whichever core is mounted.
-    var fill = false { didSet { engine.fill = fill } }
+    @PerceptionIgnored var fill = false { didSet { engine.fill = fill } }
     /// Current playhead of the active core (danmaku clock).
-    /// The core's clock only moves ~5×/s (Aether publishes at ~10 Hz), so drawing straight from it makes
+    /// The coordinator samples the clock periodically, so drawing straight from it makes
     /// scrolling comments step. Between core ticks this extrapolates with wall time at the playback rate;
     /// a jump (seek, stall, new episode) re-anchors immediately, small drift is pulled in gently.
     var playhead: Double {
@@ -142,7 +125,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         }
         return est
     }
-    private var clockAnchor: (time: Double, at: CFTimeInterval, raw: Double)?
+    @PerceptionIgnored private var clockAnchor: (time: Double, at: CFTimeInterval, raw: Double)?
     private var prepared: [Int: Source] = [:]
     private var tasks: [Int: Task<Source, Error>] = [:]
     private var observer: Any?
@@ -153,19 +136,18 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     private var pipObservation: NSKeyValueObservation?
     private var itemObservation: NSKeyValueObservation?
     private var statusObservation: NSKeyValueObservation?
-    @Published private(set) var waitingForMedia = false
+    private(set) var waitingForMedia = false
     private var audioObservers: [NSObjectProtocol] = []
-    private var nowPlaying: MPNowPlayingSession?
-    @Published private(set) var pipActive = false
-    @Published var pipError: String?
+    private(set) var pipActive = false
+    var pipError: String?
     private var restoringPiP = false
     private var backgrounded = false
     private var interrupted = false
     private var recoverInterruptedTransport = false
     private var audioSessionActive = false
     private var continuePiP = false
-    private let suppliedEngine: PlayerEngine?
-    private let sourceResolver: ((Int) async throws -> Source)?
+    @PerceptionIgnored private let suppliedEngine: PlayerEngine?
+    @PerceptionIgnored private let sourceResolver: ((Int) async throws -> Source)?
 
     init(series: HGSeries, engine: PlayerEngine? = nil, resolve: ((Int) async throws -> Source)? = nil) {
         self.series = series
@@ -179,14 +161,6 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
 
     func start() {
         guard observer == nil else { return }
-        let player = av.player
-        let session = MPNowPlayingSession(players: [player])
-        session.automaticallyPublishesNowPlayingInfo = true
-        nowPlaying = session
-        let commands = session.remoteCommandCenter
-        commands.playCommand.addTarget(self, action: #selector(remotePlay))
-        commands.pauseCommand.addTarget(self, action: #selector(remotePause))
-        commands.togglePlayPauseCommand.addTarget(self, action: #selector(remoteToggle))
         #if DEBUG
         // UI tests: an interruption that never ends (STV_FAKE_INTERRUPT=<seconds after start>).
         if let s = ProcessInfo.processInfo.environment["STV_FAKE_INTERRUPT"].flatMap(Double.init) {
@@ -207,7 +181,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
             }
         })
         bindTransportRequests(engine)
-        // One clock for both cores (AVPlayer periodic observers do not exist on Aether's software route).
+        // One timer drives playback progress and controls.
         let t = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -217,7 +191,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         registerSharedCommands()
     }
 
-    /// Lock-screen / headset commands while Aether plays (AVPlayer's own MPNowPlayingSession covers the fallback).
+    /// Lock-screen and headset command routing.
     private func registerSharedCommands() {
         guard !sharedCommandsRegistered else { return }
         sharedCommandsRegistered = true
@@ -228,7 +202,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     }
 
     private func publishNowPlaying() {
-        guard engineKind == .mpv, let i = readyIndex, episodes.indices.contains(i) else { return }
+        guard let i = readyIndex, episodes.indices.contains(i) else { return }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = [
             MPMediaItemPropertyTitle: detail?.title ?? series.title,
             MPMediaItemPropertyAlbumTitle: series.source.isLongVideo ? series.source.label : "第\(episodes[i].ep)集",
@@ -254,6 +228,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         activation = UUID()
         save(force: true)
         pip?.delegate = nil
+        pipObservation?.invalidate()
         pipObservation = nil
         statusObservation = nil
         itemObservation = nil
@@ -261,20 +236,15 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         endObserver = nil
         audioObservers.forEach(NotificationCenter.default.removeObserver)
         audioObservers.removeAll()
-        if let commands = nowPlaying?.remoteCommandCenter {
-            [commands.playCommand, commands.pauseCommand, commands.togglePlayPauseCommand].forEach { $0.removeTarget(self) }
-        }
         if sharedCommandsRegistered {
             let c = MPRemoteCommandCenter.shared()
             [c.playCommand, c.pauseCommand, c.togglePlayPauseCommand].forEach { $0.removeTarget(self) }
             sharedCommandsRegistered = false
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         }
-        nowPlaying = nil
         if pip?.isPictureInPictureActive == true {
             pip?.stopPictureInPicture()
         }
-        pip = nil
         pipIdentity = nil
         pipActive = false
         pipPossible = false
@@ -283,7 +253,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         engine.onPlaybackRequested = nil
         suppliedEngine?.stop()
         av.stop()
-        mpv?.stop()
+        pip = nil
         readyIndex = nil
         current = nil
         backgrounded = false
@@ -311,6 +281,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         guard id != pipIdentity else { return }
         guard !pipActive else { return }                 // never swap under a live PiP window
         pipIdentity = id
+        pipObservation?.invalidate()
         pipObservation = nil
         pip?.delegate = nil
         pip = nil
@@ -498,7 +469,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
 
     /// Last frame of the episode being left, shown over the (cleared) video surface until the next one is
     /// ready, so switching never flashes black.
-    @Published private(set) var heldFrame: (image: UIImage, index: Int)?
+    private(set) var heldFrame: (image: UIImage, index: Int)?
     /// The feed calls this once the swipe has settled on a ready episode.
     func releaseHeldFrame() { if heldFrame != nil { heldFrame = nil } }
 
@@ -564,10 +535,6 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                     try await next.load(src, stream: chosen[i], start: start, title: title)
                 } catch is CancellationError {
                     return
-                } catch where next.kind == .mpv {
-                    guard activation == token else { return }
-                    playbackFailed(i, src: src, engine: .mpv, error: error)
-                    return
                 }
                 guard activation == token else { return }
                 #if DEBUG
@@ -590,7 +557,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                     let next = episodes.indices.filter { $0 > i && $0 <= i + 3 }.map { episodes[$0].vid }
                     Task { await HongguoClient.shared.prefetch(vids: next) }
                 }
-                if engineKind == .avplayer { _ = await nowPlaying?.becomeActiveIfPossible() } else { publishNowPlaying() }
+                publishNowPlaying()
             } catch {
                 guard activation == token else { return }
                 errors[i] = error.localizedDescription
@@ -600,13 +567,8 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         }
     }
 
-    /// MPVKit unless the user chose the system player, the source needs AVPlayer (resource-loader AES,
-    /// FairPlay), MPVKit could not be created, or it already failed on this episode.
     private func chooseEngine(_ i: Int, _ src: Source) -> PlayerEngine {
-        if let suppliedEngine { return suppliedEngine }
-        guard PlayerEngineSettings.preferred == .mpv, !mpvFailed.contains(i),
-              let m = mpv, m.supports(src) else { return av }
-        return m
+        suppliedEngine ?? av
     }
 
     private func switchEngine(to next: PlayerEngine) {
@@ -621,18 +583,10 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         if engineKind != next.kind { engineKind = next.kind }
     }
 
-    /// Fallback ladder: MPVKit → AVPlayer on the same source → AVPlayer straight from the CDN
+    /// Retry a failed proxy through AVPlayer straight from the CDN
     /// (loopback-proxied MP4, fresh resolve) → error with the code.
     private func playbackFailed(_ i: Int, src: Source, engine kind: PlayerEngineKind, error: Error?) {
         readyIndex = nil
-        if kind == .mpv {
-            #if DEBUG
-            NSLog("%@", "[STV] mpv fallback → AVPlayer: \(error?.localizedDescription ?? "-")")
-            #endif
-            mpvFailed.insert(i)
-            activate(i)
-            return
-        }
         if Self.canBypassProxy(src, stream: chosen[i]), !bypassProxy.contains(i) {
             #if DEBUG
             NSLog("%@", "[STV] proxy fallback → direct CDN")
@@ -665,16 +619,17 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         case .file(let u): return AVURLAsset(url: u)
         case .direct(let u):
             guard u.path.hasSuffix(".mp4") else { return nil }
-            return AVURLAsset(url: u, options: mp4AssetOptions())
+            return AVURLAsset(url: u, options: ["AVURLAssetOverrideMIMETypeKey": "video/mp4"])
         case .remote(let u, let h):
-            return AVURLAsset(url: u, options: mp4AssetOptions(headers: h))
+            return AVURLAsset(url: u, options: ["AVURLAssetOverrideMIMETypeKey": "video/mp4", "AVURLAssetHTTPHeaderFieldsKey": h])
         case .stream(let loader, let s):
-            guard let u = URL(string: s), !MPVPlayerEngine.isPlaylist(u) else { return nil }
+            guard let u = URL(string: s), !u.path.lowercased().hasSuffix(".m3u8") else { return nil }
             return AVURLAsset(url: u, options: ["AVURLAssetHTTPHeaderFieldsKey": loader.headers])
         }
     }
 
     private func prepare(_ i: Int) async throws -> Source {
+        if let sourceResolver { return try await sourceResolver(i) }
         if let source = prepared[i] {
             if case .file(let url) = source, !FileManager.default.fileExists(atPath: url.path) {
                 prepared[i] = nil
@@ -686,17 +641,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         let want = chosen[i]
         let preferredId = SitePrefs.preferredStream[series.id]
         let bypass = bypassProxy.contains(i)
-        let viaMPV = PlayerEngineSettings.preferred == .mpv && !mpvFailed.contains(i) && mpv != nil
         let task = Task<Source, Error> { [weak self] in
-            if let resolve = self?.sourceResolver {
-                let source = try await resolve(i)
-                if case .direct(let url) = source, let token = LocalHLSProxy.token(of: url.absoluteString) {
-                    guard !Task.isCancelled, let self else { LocalHLSProxy.shared.release(token); throw CancellationError() }
-                    if let old = self.prefetchTokens[i], old != token { LocalHLSProxy.shared.release(old) }
-                    self.prefetchTokens[i] = token
-                }
-                return source
-            }
             var stream = want
             if stream == nil {
                 let r = try await Catalog.resolve(series, ep)
@@ -730,15 +675,17 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
             case .mp4Clear where bypass:
                 guard let u = URL(string: s.url) else { throw ProviderError.invalid(s.url) }
                 return .remote(u, s.headers)
+            case .hlsAES where !s.key.isEmpty:
+                guard let key = Bytes.fromHex(s.key), key.count == 16,
+                      let local = LocalHLSProxy.shared.keyedPlaylistURL(s.url, headers: s.headers, key: Data(key)),
+                      let url = URL(string: local), let token = LocalHLSProxy.token(of: local) else {
+                    throw ProviderError.invalid("无法准备 HLS 播放密钥")
+                }
+                self?.prefetchTokens[i] = token
+                return .direct(url)
             case .mp4Clear, .hls, .hlsAES:
                 let budget = bypass ? 0 : BufferSettings.budget(for: series.source)
                 if budget > 0, let proxied = await self?.prebuffered(s, budget: budget, index: i) { return proxied }
-                if viaMPV, s.kind != .mp4Clear, s.key.isEmpty {
-                    // Keep our playlist rewriting (ad-strip, headers, SupJav fake-PNG) via the loopback proxy.
-                    if LocalHLSProxy.token(of: s.url) != nil, let u = URL(string: s.url) { return .direct(u) }
-                    if let p = LocalHLSProxy.shared.playlistURL(s.url, headers: s.headers, strip: false, budget: 0),
-                       let u = URL(string: p) { return .direct(u) }
-                }
                 return .stream(HLSPlayback(headers: s.headers, keyHex: s.key), s.url)
             }
         }
@@ -840,7 +787,6 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     private func play() {
         activateAudioSession()
         let rate = min(playbackRate, engine.maxRate)
-        let recover = recoverInterruptedTransport
         recoverInterruptedTransport = false
         engine.play(rate: rate)
     }
@@ -940,9 +886,10 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
             lastTech = Date()
             let stream = chosen[i]
             let eng = engine
+            let token = activation
             Task { [weak self] in
                 let t = await eng.tech(stream: stream)
-                guard let self, self.engine === eng else { return }
+                guard let self, self.engine === eng, self.activation == token, self.readyIndex == i else { return }
                 if t != self.tech { self.tech = t }
                 self.refreshMediaOptions()
                 self.refreshPiP()
@@ -954,7 +901,6 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     }
 
     private func save(force: Bool) {
-        guard sourceResolver == nil else { return }
         guard let i = readyIndex, episodes.indices.contains(i) else { return }
         guard force || Date().timeIntervalSince(lastSave) > 4 else { return }
         let seconds = force ? engine.currentTime : time

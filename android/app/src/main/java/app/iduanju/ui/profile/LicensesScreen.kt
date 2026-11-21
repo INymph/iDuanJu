@@ -18,8 +18,6 @@ fun LicensesScreen(onBack: () -> Unit) {
             RowDivider()
             License("AndroidX · Jetpack Compose · Media3", "Apache License 2.0", "界面、播放器（ExoPlayer、HLS、OkHttp 数据源）。")
             RowDivider()
-            License("Jellyfin Media3 FFmpeg Decoder", "GPL-3.0", "音频软件解码。使用 org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1，源码见 github.com/jellyfin/jellyfin-androidx-media。")
-            RowDivider()
             License("OkHttp · Okio", "Apache License 2.0 · Square, Inc.", "网络请求。")
             RowDivider()
             License("Coil", "Apache License 2.0", "封面与漫画图片加载。")

@@ -1,21 +1,21 @@
 import Foundation
-import Combine
+import Perception
 
 /// Fetches 书源 chapters on demand (and the next ones ahead of the reader), caching them on disk.
-@MainActor
-final class NovelWebLoader: ObservableObject {
+@MainActor @Perceptible
+final class NovelWebLoader {
     static let shared = NovelWebLoader()
     /// Bumped whenever a chapter arrives or fails, so open readers re-paginate.
-    @Published private(set) var revision = 0
-    @Published private(set) var failed: [String: String] = [:]
-    private var running: [String: Task<Void, Error>] = [:]
-    private var prefetchDrivers: [String: Task<Void, Never>] = [:]
-    private var speculative: [String: Set<String>] = [:]
-    private var demand: [String: Set<UUID>] = [:]
-    private var readerRequests: [String: [String: Task<Void, Never>]] = [:]
-    private var prefetchFailures: [String: Int] = [:]
-    private var activeReaderBook: String?
-    private var downloads: [String: Task<Void, Never>] = [:]
+    private(set) var revision = 0
+    private(set) var failed: [String: String] = [:]
+    @PerceptionIgnored private var running: [String: Task<Void, Error>] = [:]
+    @PerceptionIgnored private var prefetchDrivers: [String: Task<Void, Never>] = [:]
+    @PerceptionIgnored private var speculative: [String: Set<String>] = [:]
+    @PerceptionIgnored private var demand: [String: Set<UUID>] = [:]
+    @PerceptionIgnored private var readerRequests: [String: [String: Task<Void, Never>]] = [:]
+    @PerceptionIgnored private var prefetchFailures: [String: Int] = [:]
+    @PerceptionIgnored private var activeReaderBook: String?
+    @PerceptionIgnored private var downloads: [String: Task<Void, Never>] = [:]
     struct DownloadState {
         var completed = 0
         var total = 0
@@ -23,7 +23,7 @@ final class NovelWebLoader: ObservableObject {
         var active = false
         var message = ""
     }
-    @Published private(set) var downloadStates: [String: DownloadState] = [:]
+    private(set) var downloadStates: [String: DownloadState] = [:]
     private let store = NovelStore.shared
 
     private func key(_ b: NovelBook, _ i: Int) -> String { NovelStore.chapterFile(b, i).path }
@@ -66,7 +66,7 @@ final class NovelWebLoader: ObservableObject {
             revision += 1
             throw LegadoError.empty("书源已删除，无法加载")
         }
-        let chapter = LegadoChapter(title: b.chapters[i].title, url: urls[i],index:i)
+        let chapter = LegadoChapter(title: b.chapters[i].title, url: urls[i])
         let next = urls.indices.contains(i + 1) ? urls[i + 1] : nil
         let bookInfo: [String: Any] = ["name": b.title, "author": b.author ?? "", "bookUrl": b.bookURL ?? "", "tocUrl": b.tocURL ?? ""]
         nonisolated(unsafe) let info = bookInfo

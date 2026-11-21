@@ -114,8 +114,6 @@ return {
 
 App 只接受本规范（idj1）的插件，不提供 FongMi / 影视TV（CatVod）兼容模式；manifest 里出现 `compat` 且不是 `idj1` 会被拒绝安装。老脚本需要按本规范改写（函数名和返回结构见上文）。苹果 CMS 采集站（`/api.php/provide/vod/`）不需要脚本：App 内置通用适配器，在「我的 → 插件 → 采集站」里填接口地址，或写进订阅列表的 `cms` 数组。
 
-可从插件导入入口选择 TVBox JSON 配置。App 只映射 `sites` 里 `type: 1` 且 `api` 可规范化为公网 HTTPS 的站点到内置苹果 CMS 适配器，并逐个请求分类接口验证；单次最多处理 50 个站点。其它 type、无效/重复地址会跳过。`spider`/JAR、CatVod JavaScript、Python spider、直播规则和解析器不会下载或执行，也不因此获得兼容支持。映射后的 MacCMS API 仍受本应用安全检查及只播放直链 m3u8/mp4 的限制。
-
 订阅列表格式：`{"name": "...", "plugins": [{"id","name","manifest","type","adult","version","description"}], "cms": [{"name","api","adult"}]}`，`manifest` 可以是相对订阅地址的路径。
 
 ## 8. 写完怎么自测

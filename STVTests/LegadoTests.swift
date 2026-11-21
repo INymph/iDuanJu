@@ -312,7 +312,7 @@ final class LegadoTests: XCTestCase {
                                     XCTAssertEqual(list.map(\.bookSourceName), ["A", "听书"], "broken entries skipped")
                                     XCTAssertEqual(list[0].ruleSearch?["checkKeyWord"], "123", "non-string rule values kept as text")
                                     XCTAssertTrue(list[0].supported)
-                                    XCTAssertTrue(list[1].supported, "audio sources dispatch to native media, not the text cache")
+                                    XCTAssertFalse(list[1].supported, "audio sources not supported")
                                 }
 
                                 /// Rhino `Packages.*` shim and Legado crypto helpers (as used by API sources such as 七猫).
@@ -417,134 +417,7 @@ function hello() { return 'hi' }
 final class RealRankRegressionTests: XCTestCase {
     private var root: URL { URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/legado-rank") }
     override func tearDown() { LegadoHTTP.transport = nil }
-    /// Multiline request options are part of book identity, not a list of links.
-    func testUnsupportedFormatsAreNotBadSources() throws {
-        for kind in [2,3] {
-            let raw="{\"bookSourceUrl\":\"https://example.org\",\"bookSourceType\":\(kind),\"exploreUrl\":\"/catalog\"}"
-            let source=try XCTUnwrap(LegadoSourceStore.parse(Data(raw.utf8)).first)
-            XCTAssertFalse(source.supported)
-        }
-        XCTAssertTrue(try XCTUnwrap(LegadoSourceStore.parse(Data(#"[{"sourceUrl":"https://example.org","ruleArticles":"a"}]"#.utf8)).first).isRSS)
-        for raw in [#"{"sites":[],"spider":"x.jar"}"#] {
-            XCTAssertThrowsError(try LegadoSourceStore.parse(Data(raw.utf8))) { error in
-                XCTAssertTrue(error.localizedDescription.contains("不是坏源"))
-            }
-        }
-    }
-
-    func testMultilinePostBookURLPreservesIdentity() {
-        let raw="https://example.org/detail,{\n  \"method\": \"POST\",\n  \"body\": \"book_id=12\"\n}"
-        XCTAssertEqual(LegadoClient.firstRequestURL(raw),raw)
-        XCTAssertNotEqual(LegadoClient.firstRequestURL(raw),LegadoClient.firstRequestURL(raw.replacingOccurrences(of:"book_id=12",with:"book_id=13")))
-        XCTAssertEqual(LegadoClient.firstRequestURL(" /one\n /two "),"/one")
-    }
-
-    func testDependentFiltersRegenerateUrlsAndStayScoped() throws {
-        let raw: [String:Any] = ["bookSourceUrl":"https://dependent-" + UUID().uuidString + ".example", "exploreUrl":#"@js:var g=infoMap.gender||'male';var ks=g==='female'?['romance','history']:['fantasy','scifi'];JSON.stringify([{title:'gender',type:'select',chars:['male','female'],default:'male'},{title:'kind',type:'select',chars:ks,default:ks[0]},{title:'list',url:'/list?gender='+g+'&kind='+(infoMap.kind||ks[0])+'&page={{page}}'}]);"#]
-        let source = try XCTUnwrap(LegadoSourceStore.parse(JSONSerialization.data(withJSONObject: raw)).first)
-        var cats = try LegadoClient.exploreCategories(source)
-        XCTAssertEqual(cats.first { $0.title == "kind" }?.value, "fantasy")
-        try LegadoClient.exploreAction(source, category: XCTUnwrap(cats.first { $0.title == "kind" }), value: "scifi")
-        cats = try LegadoClient.exploreCategories(source)
-        try LegadoClient.exploreAction(source, category: XCTUnwrap(cats.first { $0.title == "gender" }), value: "female")
-        cats = try LegadoClient.exploreCategories(source)
-        XCTAssertEqual(cats.first { $0.title == "kind" }?.value, "romance")
-        XCTAssertTrue(cats.first { $0.title == "list" }?.url.contains("kind=romance") == true)
-        XCTAssertEqual(try LegadoClient.exploreCategories(source).first { $0.title == "gender" }?.value, "female")
-        var other = source; other.bookSourceUrl = "https://other-" + UUID().uuidString + ".example"
-        XCTAssertEqual(try LegadoClient.exploreCategories(other).first { $0.title == "gender" }?.value, "male")
-        other.exploreUrl = "热门::/rank"
-        XCTAssertFalse(try LegadoClient.exploreCategories(other).contains { $0.isControl })
-    }
-
-    func testOptInTwoRealSourcesFilterRequests() throws {
-        guard let path = ProcessInfo.processInfo.environment["STV_COMPAT_COLLECTION"] else { throw XCTSkip("set STV_COMPAT_COLLECTION") }
-        let sources = try LegadoSourceStore.parse(Data(contentsOf: URL(fileURLWithPath:path)))
-        let wanted = try ["七猫小说", "米读小说"].map { name in try XCTUnwrap(sources.first { $0.bookSourceName == name }) }
-        var requests: [[String:Any]] = []; let lock = NSLock()
-        let allowed = Set(["gender","book_preference","over","words","sort","page","tag_id","second_channel","status","rank","app","id","keyword"])
-        LegadoHTTP.transport = { req in
-            let sem = DispatchSemaphore(value:0)
-            var reply: (Data?,URLResponse?,Error?) = (nil,nil,nil)
-            URLSession.shared.dataTask(with:req) { d,r,e in reply=(d,r,e);sem.signal() }.resume()
-            guard sem.wait(timeout:.now()+30) == .success else { throw LegadoError.network("diagnostic request timeout") }
-            if let e=reply.2 { throw e }
-            let response = try XCTUnwrap(reply.1 as? HTTPURLResponse)
-            let u = try XCTUnwrap(req.url), c = URLComponents(url:u,resolvingAgainstBaseURL:false)
-            var params:[String:String]=[:]
-            for q in c?.queryItems ?? [] where allowed.contains(q.name) { params[q.name]=q.value ?? "" }
-            if let body=req.httpBody, let text=String(data:body,encoding:.utf8), let b=URLComponents(string:"https://test.invalid/?"+text) {
-                for q in b.queryItems ?? [] where allowed.contains(q.name) { params[q.name]=q.value ?? "" }
-            }
-            lock.lock();requests.append(["method":req.httpMethod ?? "GET","origin":u.host ?? "","path":u.path,"params":params,"status":response.statusCode]);lock.unlock()
-            return (reply.0 ?? Data(),response)
-        }
-        defer { LegadoHTTP.transport=nil }
-        var outcomes:[[String:Any]]=[]
-        defer {
-            if let dir=ProcessInfo.processInfo.environment["STV_SHOT_DIR"],let data=try? JSONSerialization.data(withJSONObject:["requests":requests,"outcomes":outcomes],options:[.prettyPrinted,.sortedKeys]) {
-                try? data.write(to:URL(fileURLWithPath:dir).appendingPathComponent("ios-real-filter-requests.json"))
-            }
-        }
-        for source in wanted {
-            let scope="s|"+source.bookSourceUrl
-            let saved=LegadoVars.get(scope,"__sourceVariable"),savedInfo=LegadoVars.get(scope,"__exploreInfoMap")
-            LegadoVars.put(scope,"__sourceVariable","{}");LegadoVars.put(scope,"__exploreInfoMap","{}")
-            defer { LegadoVars.put(scope,"__sourceVariable",saved ?? "{}");LegadoVars.put(scope,"__exploreInfoMap",savedInfo ?? "{}") }
-            var cats=try LegadoClient.exploreCategories(source)
-            func apply(_ label:String) throws {
-                let button=try XCTUnwrap(cats.first { $0.title.replacingOccurrences(of:"● ",with:"").trimmingCharacters(in:.whitespaces)==label })
-                try LegadoClient.exploreAction(source,category:button)
-                cats=try LegadoClient.exploreCategories(source)
-            }
-            if source.bookSourceName == "七猫小说" {
-                var selected=try XCTUnwrap(cats.first { !$0.isControl && !$0.url.isEmpty })
-                try apply(try XCTUnwrap(cats.first { $0.title.hasPrefix("⚙ 筛选") }).title)
-                for value in ["完结","50-100万","按评分"] { try apply(value) }
-                selected=try XCTUnwrap(LegadoClient.refreshedCategory(selected,in:cats,group:selected.group))
-                let books=try LegadoClient.explore(source,category:selected,page:1);XCTAssertFalse(books.isEmpty)
-                let male=try XCTUnwrap(requests.last { ($0["path"] as? String)=="/api/v4/tag/index" }?["params"] as? [String:String])
-                XCTAssertEqual(male["gender"],"1");XCTAssertEqual(male["over"],"1");XCTAssertEqual(male["words"],"2");XCTAssertEqual(male["sort"],"2");XCTAssertEqual(male["page"],"1")
-                try apply("♀ 女频")
-                selected=try XCTUnwrap(LegadoClient.refreshedCategory(selected,in:cats,group:selected.group))
-                let female=try LegadoClient.explore(source,category:selected,page:1);XCTAssertFalse(female.isEmpty)
-                let fp=try XCTUnwrap(requests.last { ($0["path"] as? String)=="/api/v4/tag/index" }?["params"] as? [String:String]);XCTAssertEqual(fp["gender"],"2")
-                for value in ["全部状态","全部字数","按热度"] { try apply(value) }
-                selected=try XCTUnwrap(LegadoClient.refreshedCategory(selected,in:cats,group:selected.group))
-                let reset=try LegadoClient.explore(source,category:selected,page:1);XCTAssertFalse(reset.isEmpty)
-                let rp=try XCTUnwrap(requests.last { ($0["path"] as? String)=="/api/v4/tag/index" }?["params"] as? [String:String]);XCTAssertEqual(rp["over"],"-99");XCTAssertEqual(rp["words"],"-99");XCTAssertEqual(rp["sort"],"0");XCTAssertEqual(rp["page"],"1")
-                outcomes.append(["source":source.bookSourceName,"male":books.count,"female":female.count,"reset":reset.count,"passed":true])
-            } else {
-                let control=try XCTUnwrap(cats.first { $0.type=="select" })
-                let first=try XCTUnwrap(cats.first { !$0.isControl && !$0.url.isEmpty })
-                let male=try LegadoClient.explore(source,category:first,page:1);XCTAssertFalse(male.isEmpty)
-                try LegadoClient.exploreAction(source,category:control,value:"女频");cats=try LegadoClient.exploreCategories(source)
-                XCTAssertEqual(cats.first { $0.title==control.title }?.value,"女频")
-                let femaleCategory=try XCTUnwrap(cats.first { !$0.isControl && !$0.url.isEmpty })
-                let female=try LegadoClient.explore(source,category:femaleCategory,page:1);XCTAssertFalse(female.isEmpty)
-                let scene=requests.filter { ($0["path"] as? String)=="/fiction/scene/getCategoryV4" }.compactMap { ($0["params"] as? [String:String])?["id"] }
-                XCTAssertTrue(scene.contains("281"));XCTAssertTrue(scene.contains("282"))
-                XCTAssertGreaterThan(Set(male.map(\.bookURL)).count,1);XCTAssertGreaterThan(Set(female.map(\.bookURL)).count,1)
-                outcomes.append(["source":source.bookSourceName,"male":male.count,"female":female.count,"unique":Set(female.map(\.bookURL)).count,"passed":true])
-            }
-        }
-    }
-
-    func testOptInPublicDomainClassicFlow() throws {
-        guard let path = ProcessInfo.processInfo.environment["STV_COMPAT_BOOK"] else { throw XCTSkip("set STV_COMPAT_BOOK") }
-        let source = try XCTUnwrap(LegadoSourceStore.parse(Data(contentsOf: URL(fileURLWithPath: path))).first)
-        XCTAssertTrue(source.supported)
-        let category = try XCTUnwrap(LegadoClient.exploreCategories(source).first { $0.action == nil && !$0.url.isEmpty })
-        let books = try LegadoClient.explore(source, category: category, page: 1)
-        let first = try XCTUnwrap(books.first)
-        let info = try LegadoClient.info(source, bookURL: first.bookURL)
-        let toc = try LegadoClient.toc(source, tocURL: info.tocURL, book: ["name":first.name])
-        let chapter = try XCTUnwrap(toc.first)
-        let text = try LegadoClient.content(source, chapter: chapter, nextChapterURL: toc.dropFirst().first?.url, book: ["name":first.name])
-        XCTAssertGreaterThan(text.count, 30)
-        print("SOURCE_COMPAT_CLASSIC name=\(first.name) books=\(books.count) toc=\(toc.count) content=\(text.count)")
-    }
-
+    /// Timestamp/signature change on each run; all other request fields remain part of replay matching.
     private static func stableURL(_ raw: String) -> String {
         guard var u = URLComponents(string: raw) else { return raw }
         u.queryItems = u.queryItems?.filter { !["t", "sign"].contains($0.name) }.sorted { $0.name < $1.name }

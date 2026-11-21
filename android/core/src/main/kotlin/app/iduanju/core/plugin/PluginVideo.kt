@@ -15,7 +15,7 @@ object PluginOut {
     fun s(v: Any?, max: Int = 300): String = when (v) { is String -> v; is Number -> v.toString(); else -> "" }.trim().take(max)
     fun url(v: Any?): String { val u = s(v, 2000); return if (u.startsWith("https://") || u.startsWith("http://")) u else "" }
     fun strings(v: Any?, max: Int = 30): List<String> { val a = v as? JSONArray ?: return emptyList(); return (0 until minOf(a.length(), max)).map { s(a.opt(it), 60) }.filter { it.isNotEmpty() } }
-    fun headers(v: Any?): Map<String, String> { val o = v as? JSONObject ?: return emptyMap(); return o.keys().asSequence().filter { it.lowercase() in allowedHeaders }.associateWith { s(o.opt(it), 500) }.filterValues { value -> value.none { it.code<32 || it.code==127 } } }
+    fun headers(v: Any?): Map<String, String> { val o = v as? JSONObject ?: return emptyMap(); return o.keys().asSequence().filter { it.lowercase() in allowedHeaders }.associateWith { s(o.opt(it), 500) } }
     fun categories(v: Any?): List<CMSCategory> {
         val a = v as? JSONArray ?: return emptyList()
         return (0 until minOf(a.length(), 60)).mapNotNull { i -> val c = a.optJSONObject(i) ?: return@mapNotNull null
@@ -88,7 +88,7 @@ class PluginVideo(val inst: PluginInstance, private val extraDomains: List<Strin
         val streams = PluginOut.objs(o.opt("streams"), 12).mapIndexedNotNull { i, st ->
             val u = PluginOut.url(st.opt("url"))
             val url = runCatching { java.net.URI(u) }.getOrNull(); val host = url?.host
-            if (url == null || host == null || url.scheme != "https" || url.rawUserInfo != null || (url.port!=-1 && url.port!=443) || !pol.allows(host) || NetGuard.isIPLiteral(host) || (inst.host.fixture==null && NetGuard.resolvesToBlocked(host))) {
+            if (url == null || host == null || url.scheme != "https" || !pol.allows(host) || NetGuard.isIPLiteral(host)) {
                 inst.host.log("✕ 丢弃未授权/非 https 的流地址 ${host ?: u.take(40)}"); return@mapIndexedNotNull null
             }
             val fmt = st.optString("format").ifEmpty { if (u.contains(".m3u8")) "hls" else "mp4" }

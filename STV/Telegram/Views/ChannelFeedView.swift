@@ -1,11 +1,12 @@
+import Perception
 import SwiftUI
 
 /// 「频道」: merged newest-first feed of subscribed public channels (朋友圈 style).
 /// Embedded as a home source page and also pushable from 我的.
 struct ChannelFeedView: View {
     var embedded = false
-    @ObservedObject private var store = TGStore.shared
-    @ObservedObject private var gate = SourceGate.shared
+    private let store = TGStore.shared
+    private let gate = SourceGate.shared
     @State private var only: String?
     @State private var viewer: ViewerPayload?
     @State private var blockTarget: TGPost?
@@ -17,52 +18,64 @@ struct ChannelFeedView: View {
     struct ViewerPayload: Identifiable { let id = UUID(); let urls: [String]; let index: Int }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                toolbarRow
-                channelChips.padding(.bottom, 6)
-                errorBanners
-                let entries = store.feed(only)
-                if store.visibleChannels.isEmpty {
-                    emptySubscriptions
-                } else if entries.isEmpty {
-                    if !store.loading.isEmpty {
-                        ProgressView().tint(STVTheme.secondary).frame(maxWidth: .infinity).padding(.top, 60)
-                    } else {
-                        Text("下拉刷新，或点右上角 ↻").font(.subheadline).foregroundStyle(STVTheme.secondary).frame(maxWidth: .infinity).padding(.top, 60)
+        WithPerceptionTracking {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    WithPerceptionTracking {
+                        toolbarRow
+                        channelChips.padding(.bottom, 6)
+                        errorBanners
+                        let entries = store.feed(only)
+                        if store.visibleChannels.isEmpty {
+                            emptySubscriptions
+                        } else if entries.isEmpty {
+                            if !store.loading.isEmpty {
+                                ProgressView().tint(STVTheme.secondary).frame(maxWidth: .infinity).padding(.top, 60)
+                            } else {
+                                Text("下拉刷新，或点右上角 ↻").font(.subheadline).foregroundStyle(STVTheme.secondary).frame(maxWidth: .infinity).padding(.top, 60)
+                            }
+                        }
+                        ForEach(entries) { e in
+                            WithPerceptionTracking {
+                                TGPostCard(post: e.post, channel: store.channel(e.post.channel), verdict: e.verdict, actions: actions)
+                                    .padding(.horizontal, e.verdict.blocked ? 16 : 0).padding(.vertical, e.verdict.blocked ? 4 : 0)
+                                Divider().overlay(STVTheme.text.opacity(0.06)).padding(.leading, 66)
+                            }
+                        }
+                        if !entries.isEmpty && store.hasMore(only) {
+                            ProgressView().tint(STVTheme.secondary).frame(maxWidth: .infinity).padding(20)
+                                .onAppear { Task { await store.loadMore(only) } }
+                                .accessibilityIdentifier("tg.loadMore")
+                        }
                     }
                 }
-                ForEach(entries) { e in
-                    TGPostCard(post: e.post, channel: store.channel(e.post.channel), verdict: e.verdict, actions: actions)
-                        .padding(.horizontal, e.verdict.blocked ? 16 : 0).padding(.vertical, e.verdict.blocked ? 4 : 0)
-                    Divider().overlay(STVTheme.text.opacity(0.06)).padding(.leading, 66)
-                }
-                if !entries.isEmpty && store.hasMore(only) {
-                    ProgressView().tint(STVTheme.secondary).frame(maxWidth: .infinity).padding(20)
-                        .onAppear { Task { await store.loadMore(only) } }
-                        .accessibilityIdentifier("tg.loadMore")
+                .padding(.bottom, 24)
+            }
+            .scrollIndicators(.hidden)
+            .refreshable { await store.refresh(only) }
+            .background(embedded ? Color.clear : STVTheme.bg)
+            .overlay(alignment: .bottom) {
+                if let toast { Text(toast).font(.footnote).foregroundStyle(.white).padding(10).background(.black.opacity(0.75), in: Capsule()).padding(.bottom, 90) }
+            }
+            .navigationTitle(embedded ? "" : "频道")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(embedded ? .hidden : .visible, for: .navigationBar)
+            .task { if store.feed(only).isEmpty { await store.refresh() } }
+            .task(id: toast) { if toast != nil { try? await Task.sleep(for: .seconds(2.2)); toast = nil } }
+            .fullScreenCover(item: $viewer) { v in
+                WithPerceptionTracking {
+                    ImageViewer(items: v.urls.map { .init(url: $0) }, index: v.index, onSave: { try await TGDownloads.savePhoto($0.url) })
                 }
             }
-            .padding(.bottom, 24)
+            .sheet(item: $blockTarget) { p in WithPerceptionTracking {
+                TGBlockSheet(post: p)
+            } }
+            .sheet(item: Binding(get: { botTarget.map { BotBox(link: $0) } }, set: { botTarget = $0?.link })) { b in WithPerceptionTracking {
+                TGBotSheet(link: b.link)
+            } }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("tg.feed")
         }
-        .scrollIndicators(.hidden)
-        .refreshable { await store.refresh(only) }
-        .background(embedded ? Color.clear : STVTheme.bg)
-        .overlay(alignment: .bottom) {
-            if let toast { Text(toast).font(.footnote).foregroundStyle(.white).padding(10).background(.black.opacity(0.75), in: Capsule()).padding(.bottom, 90) }
-        }
-        .navigationTitle(embedded ? "" : "频道")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(embedded ? .hidden : .visible, for: .navigationBar)
-        .task { if store.feed(only).isEmpty { await store.refresh() } }
-        .task(id: toast) { if toast != nil { try? await Task.sleep(for: .seconds(2.2)); toast = nil } }
-        .fullScreenCover(item: $viewer) { v in
-            ImageViewer(items: v.urls.map { .init(url: $0) }, index: v.index, onSave: { try await TGDownloads.savePhoto($0.url) })
-        }
-        .sheet(item: $blockTarget) { p in TGBlockSheet(post: p) }
-        .sheet(item: Binding(get: { botTarget.map { BotBox(link: $0) } }, set: { botTarget = $0?.link })) { b in TGBotSheet(link: b.link) }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("tg.feed")
     }
 
     private struct BotBox: Identifiable { let link: TGBotLink; var id: String { link.bot + link.payload } }
@@ -114,8 +127,10 @@ struct ChannelFeedView: View {
             HStack(spacing: 8) {
                 GlassChip(title: "全部", selected: only == nil) { only = nil }
                 ForEach(store.visibleChannels) { c in
-                    GlassChip(title: c.displayName, selected: only == c.id) { only = c.id }
-                        .accessibilityIdentifier("tg.chip.\(c.id)")
+                    WithPerceptionTracking {
+                        GlassChip(title: c.displayName, selected: only == c.id) { only = c.id }
+                            .accessibilityIdentifier("tg.chip.\(c.id)")
+                    }
                 }
             }.padding(.horizontal, 16)
         }
@@ -124,30 +139,32 @@ struct ChannelFeedView: View {
     @ViewBuilder private var errorBanners: some View {
         let errs = store.visibleChannels.filter { (only == nil || $0.id == only) && store.errors[$0.id] != nil }
         ForEach(errs) { c in
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle").foregroundStyle(STVTheme.accentWarm)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(c.displayName + (c.subscribers.isEmpty ? "" : " · " + c.subscribers)).font(.caption.weight(.semibold)).foregroundStyle(STVTheme.text)
-                    Text(store.errors[c.id] ?? "").font(.caption).foregroundStyle(STVTheme.secondary)
-                    HStack(spacing: 14) {
-                        if store.needsTDLogin.contains(c.id) && !TDLibService.shared.state.isReady {
-                            Button("去登录 TDLib") { Router.push(.tdlib) }.accessibilityIdentifier("tg.error.login.\(c.id)")
-                        }
-                        if store.tdRestricted.contains(c.id), TDLibService.shared.sensitive.canChange, !TDLibService.shared.sensitive.enabled {
-                            Button("显示敏感内容") {
-                                Task { try? await TDLibService.shared.setSensitive(true); await store.refresh(c.id) }
-                            }.accessibilityIdentifier("tg.error.sensitive.\(c.id)")
-                        }
-                        Button("在 Telegram 中打开") { if let u = URL(string: "https://t.me/\(c.username)") { openURL(u) } }
-                    }.font(.caption.weight(.semibold))
+            WithPerceptionTracking {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(STVTheme.accentWarm)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(c.displayName + (c.subscribers.isEmpty ? "" : " · " + c.subscribers)).font(.caption.weight(.semibold)).foregroundStyle(STVTheme.text)
+                        Text(store.errors[c.id] ?? "").font(.caption).foregroundStyle(STVTheme.secondary)
+                        HStack(spacing: 14) {
+                            if store.needsTDLogin.contains(c.id) && !TDLibService.shared.state.isReady {
+                                Button("去登录 TDLib") { Router.push(.tdlib) }.accessibilityIdentifier("tg.error.login.\(c.id)")
+                            }
+                            if store.tdRestricted.contains(c.id), TDLibService.shared.sensitive.canChange, !TDLibService.shared.sensitive.enabled {
+                                Button("显示敏感内容") {
+                                    Task { try? await TDLibService.shared.setSensitive(true); await store.refresh(c.id) }
+                                }.accessibilityIdentifier("tg.error.sensitive.\(c.id)")
+                            }
+                            Button("在 Telegram 中打开") { if let u = URL(string: "https://t.me/\(c.username)") { openURL(u) } }
+                        }.font(.caption.weight(.semibold))
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                .padding(12)
+                .background(STVTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16).padding(.bottom, 8)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("tg.error.\(c.id)")
             }
-            .padding(12)
-            .background(STVTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 16).padding(.bottom, 8)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("tg.error.\(c.id)")
         }
     }
 

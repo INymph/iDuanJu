@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 
 /// Full-screen image viewer shared by Telegram posts, downloads and the manga reader:
@@ -14,51 +15,55 @@ struct ImageViewer: View {
     @State private var toast: String?
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(1 - min(0.7, Double(abs(drag)) / 600.0)).ignoresSafeArea()
-            TabView(selection: $index) {
-                ForEach(items.indices, id: \.self) { i in
-                    ZoomableImage(url: items[i].url, headers: headers, zoomed: $zoomed).tag(i)
+        WithPerceptionTracking {
+            ZStack {
+                Color.black.opacity(1 - min(0.7, Double(abs(drag)) / 600.0)).ignoresSafeArea()
+                TabView(selection: $index) {
+                    ForEach(items.indices, id: \.self) { i in
+                        WithPerceptionTracking {
+                            ZoomableImage(url: items[i].url, headers: headers, zoomed: $zoomed).tag(i)
+                        }
+                    }
                 }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            // Zoomed: drags pan the image instead of turning the page (zoom out, or double tap, to page again).
-            .scrollDisabled(zoomed)
-            .offset(y: drag)
-            .simultaneousGesture(zoomed ? nil : DragGesture(minimumDistance: 20)
-                .onChanged { v in if abs(v.translation.height) > abs(v.translation.width) { drag = v.translation.height } }
-                .onEnded { v in
-                    if abs(v.translation.height) > 120 || abs(v.predictedEndTranslation.height) > 300 { dismiss() }
-                    else { withAnimation(.spring(response: 0.3)) { drag = 0 } }
-                })
-            VStack {
-                HStack {
-                    Button { dismiss() } label: { Image(systemName: "xmark").font(.headline).padding(12).background(.ultraThinMaterial, in: Circle()) }
-                        .accessibilityIdentifier("viewer.close")
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                // Zoomed: drags pan the image instead of turning the page (zoom out, or double tap, to page again).
+                .scrollDisabled(zoomed)
+                .offset(y: drag)
+                .simultaneousGesture(zoomed ? nil : DragGesture(minimumDistance: 20)
+                    .onChanged { v in if abs(v.translation.height) > abs(v.translation.width) { drag = v.translation.height } }
+                    .onEnded { v in
+                        if abs(v.translation.height) > 120 || abs(v.predictedEndTranslation.height) > 300 { dismiss() }
+                        else { withAnimation(.spring(response: 0.3)) { drag = 0 } }
+                    })
+                VStack {
+                    HStack {
+                        Button { dismiss() } label: { Image(systemName: "xmark").font(.headline).padding(12).background(.ultraThinMaterial, in: Circle()) }
+                            .accessibilityIdentifier("viewer.close")
+                        Spacer()
+                        Text("\(index + 1) / \(items.count)").font(.subheadline.monospacedDigit()).foregroundStyle(.white)
+                            .accessibilityIdentifier("viewer.counter")
+                        Spacer()
+                        if let onSave {
+                            Button {
+                                Task {
+                                    do { try await onSave(items[index]); toast = "已保存到相册" } catch { toast = error.localizedDescription }
+                                }
+                            } label: { Image(systemName: "square.and.arrow.down").font(.headline).padding(12).background(.ultraThinMaterial, in: Circle()) }
+                                .accessibilityLabel("保存到相册")
+                        } else { Color.clear.frame(width: 44, height: 44) }
+                    }
+                    .foregroundStyle(.white).padding(.horizontal, 16)
                     Spacer()
-                    Text("\(index + 1) / \(items.count)").font(.subheadline.monospacedDigit()).foregroundStyle(.white)
-                        .accessibilityIdentifier("viewer.counter")
-                    Spacer()
-                    if let onSave {
-                        Button {
-                            Task {
-                                do { try await onSave(items[index]); toast = "已保存到相册" } catch { toast = error.localizedDescription }
-                            }
-                        } label: { Image(systemName: "square.and.arrow.down").font(.headline).padding(12).background(.ultraThinMaterial, in: Circle()) }
-                            .accessibilityLabel("保存到相册")
-                    } else { Color.clear.frame(width: 44, height: 44) }
+                    if let toast { Text(toast).font(.footnote).foregroundStyle(.white).padding(10).background(.black.opacity(0.6), in: Capsule()).padding(.bottom, 30) }
                 }
-                .foregroundStyle(.white).padding(.horizontal, 16)
-                Spacer()
-                if let toast { Text(toast).font(.footnote).foregroundStyle(.white).padding(10).background(.black.opacity(0.6), in: Capsule()).padding(.bottom, 30) }
+                .opacity(drag == 0 ? 1 : 0)
             }
-            .opacity(drag == 0 ? 1 : 0)
+            .statusBarHidden()
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("tg.viewer")
+            .preferredColorScheme(.dark)
+            .task(id: toast) { if toast != nil { try? await Task.sleep(for: .seconds(2)); toast = nil } }
         }
-        .statusBarHidden()
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("tg.viewer")
-        .preferredColorScheme(.dark)
-        .task(id: toast) { if toast != nil { try? await Task.sleep(for: .seconds(2)); toast = nil } }
     }
 }
 
@@ -74,25 +79,27 @@ struct ZoomableImage: View {
     @State private var isZoomed = false
 
     var body: some View {
-        ZStack {
-            if let image {
-                ZoomScrollView(image: image) { z in
-                    isZoomed = z
-                    if zoomed != z { zoomed = z }
+        WithPerceptionTracking {
+            ZStack {
+                if let image {
+                    ZoomScrollView(image: image) { z in
+                        isZoomed = z
+                        if zoomed != z { zoomed = z }
+                    }
+                    .accessibilityElement()
+                    .accessibilityAddTraits(.isImage)
+                    .accessibilityIdentifier("viewer.image")
+                    .accessibilityValue(isZoomed ? "zoomed" : "fit")
+                } else if failed {
+                    Image(systemName: "photo").font(.largeTitle).foregroundStyle(.white.opacity(0.4))
+                } else {
+                    ProgressView().tint(.white)
                 }
-                .accessibilityElement()
-                .accessibilityAddTraits(.isImage)
-                .accessibilityIdentifier("viewer.image")
-                .accessibilityValue(isZoomed ? "zoomed" : "fit")
-            } else if failed {
-                Image(systemName: "photo").font(.largeTitle).foregroundStyle(.white.opacity(0.4))
-            } else {
-                ProgressView().tint(.white)
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: url) {
-            do { image = try await CoverStore.shared.image(url: url, headers: headers) } catch { failed = true }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .task(id: url) {
+                do { image = try await CoverStore.shared.image(url: url, headers: headers) } catch { failed = true }
+            }
         }
     }
 }

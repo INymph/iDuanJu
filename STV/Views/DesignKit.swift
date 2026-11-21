@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 
 // i短剧 redesign building blocks (ui-redesign/styles.css + video.css). Colours come from STVTheme; every size here
@@ -6,7 +7,7 @@ import SwiftUI
 enum DS {
     /// One spring for selection changes (tabs, segments, chips) and one for panels / bars.
     static let select = Animation.spring(response: 0.22, dampingFraction: 0.88)
-    static let panel = Animation.spring(response: 0.32, dampingFraction: 0.90)
+    static let panel = Animation.spring(response: 0.30, dampingFraction: 0.90)
     static let press = Animation.spring(response: 0.14, dampingFraction: 0.82)
     /// Spaced numbers like the spec: "512.6 万", "全 82 集".
     static func count(_ n: Int) -> String {
@@ -90,18 +91,22 @@ extension View {
 struct AmbientGlow: View {
     var cool = false
     var body: some View {
-        GeometryReader { g in
-            let w = g.size.width, h: CGFloat = 380
-            let c = cool ? STVTheme.ambientCool : STVTheme.ambientWarm
-            RadialGradient(stops: [.init(color: c[0], location: 0), .init(color: c[1], location: cool ? 0.40 : 0.36),
-                                   .init(color: c[1].opacity(0), location: 0.72)],
-                           center: .center, startRadius: 0, endRadius: h)
-                .frame(width: h * 2, height: h * 2)
-                .scaleEffect(x: 1.3 * w / h, y: 1)
-                .position(x: 0.25 * w, y: -0.08 * h)
+        WithPerceptionTracking {
+            GeometryReader { g in
+                WithPerceptionTracking {
+                    let w = g.size.width, h: CGFloat = 380
+                    let c = cool ? STVTheme.ambientCool : STVTheme.ambientWarm
+                    RadialGradient(stops: [.init(color: c[0], location: 0), .init(color: c[1], location: cool ? 0.40 : 0.36),
+                                           .init(color: c[1].opacity(0), location: 0.72)],
+                                   center: .center, startRadius: 0, endRadius: h)
+                        .frame(width: h * 2, height: h * 2)
+                        .scaleEffect(x: 1.3 * w / h, y: 1)
+                        .position(x: 0.25 * w, y: -0.08 * h)
+                }
+            }
+            .frame(height: 380)
+            .clipped()
         }
-        .frame(height: 380)
-        .clipped()
     }
 }
 
@@ -115,27 +120,26 @@ struct UnderlineTabs<T: Hashable>: View {
     var idPrefix = "tabs"
     @Namespace private var ns
     var body: some View {
-        HStack(alignment: .lastTextBaseline, spacing: small ? 6 : 4) {
-            ForEach(items, id: \.self) { it in
-                let on = it == selection
-                Button {
-                    if selection != it {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        WithPerceptionTracking {
+            HStack(alignment: .lastTextBaseline, spacing: small ? 6 : 4) {
+                ForEach(items, id: \.self) { it in
+                    WithPerceptionTracking {
+                        let on = it == selection
+                        Button { withAnimation(DS.select) { $selection.withSelectionFeedback().wrappedValue = it } } label: {
+                            UnderlineTabLabel(title: label(it), on: on, small: small, ns: ns)
+                                .padding(.horizontal, 9)
+                                .frame(minWidth: 44, minHeight: small ? 38 : 44, alignment: small ? .center : .bottom)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressScale(scale: 0.95))
+                        .accessibilityIdentifier("\(idPrefix).\(label(it))")
+                        .accessibilityAddTraits(on ? .isSelected : [])
                     }
-                    withAnimation(DS.select) { selection = it }
-                } label: {
-                    UnderlineTabLabel(title: label(it), on: on, small: small, ns: ns)
-                        .padding(.horizontal, small ? 9 : 9)
-                        .frame(minWidth: 44, minHeight: small ? 38 : 44, alignment: small ? .center : .bottom)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(PressScale(scale: 0.95))
-                .accessibilityIdentifier("\(idPrefix).\(label(it))")
-                .accessibilityAddTraits(on ? .isSelected : [])
             }
+            .padding(.horizontal, -9)
+            .frame(height: small ? 38 : 44, alignment: small ? .center : .bottom)
         }
-        .padding(.horizontal, -9)
-        .frame(height: small ? 38 : 44, alignment: small ? .center : .bottom)
     }
 }
 
@@ -147,21 +151,23 @@ struct UnderlineTabLabel: View {
     var inkOff: Color = STVTheme.secondary
     let ns: Namespace.ID
     var body: some View {
-        Text(title)
-            .font(.system(size: on ? (small ? 18 : 24) : (small ? 16 : 17), weight: on ? (small ? .bold : .heavy) : .regular))
-            .tracking(on && !small ? 0.2 : 0)
-            .foregroundStyle(on ? ink : inkOff)
-            .lineLimit(1).fixedSize()
-            .padding(.bottom, small ? 0 : 6)
-            .overlay(alignment: small ? .bottom : .bottomLeading) {
-                if on {
-                    Capsule().fill(STVTheme.accent)
-                        .frame(width: small ? 22 : 26, height: small ? 3 : 4)
-                        .offset(x: small ? 0 : 1, y: small ? 8 : 0)
-                        .matchedGeometryEffect(id: "underline", in: ns)
+        WithPerceptionTracking {
+            Text(title)
+                .font(.system(size: on ? (small ? 18 : 24) : (small ? 16 : 17), weight: on ? (small ? .bold : .heavy) : .regular))
+                .tracking(on && !small ? 0.2 : 0)
+                .foregroundStyle(on ? ink : inkOff)
+                .lineLimit(1).fixedSize()
+                .padding(.bottom, small ? 0 : 6)
+                .overlay(alignment: small ? .bottom : .bottomLeading) {
+                    if on {
+                        Capsule().fill(STVTheme.accent)
+                            .frame(width: small ? 22 : 26, height: small ? 3 : 4)
+                            .offset(x: small ? 0 : 1, y: small ? 8 : 0)
+                            .matchedGeometryEffect(id: "underline", in: ns)
+                    }
                 }
-            }
-            .contentShape(Rectangle())
+                .contentShape(Rectangle())
+        }
     }
 }
 
@@ -174,33 +180,37 @@ struct SegmentedTabs<T: Hashable>: View {
     var idPrefix = "seg"
     @Namespace private var ns
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(items, id: \.self) { it in
-                let on = it == selection
-                Button { withAnimation(DS.select) { selection = it } } label: {
-                    Text(label(it))
-                        .font(.system(size: 14, weight: on ? .semibold : .regular))
-                        .foregroundStyle(on ? STVTheme.text : STVTheme.secondary)
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background {
-                            if on {
-                                RoundedRectangle(cornerRadius: 11, style: .continuous).fill(STVTheme.thumb)
-                                    .shadow(color: STVTheme.shadowThumb, radius: 3, y: 1.5)
-                                    .matchedGeometryEffect(id: "thumb", in: ns)
-                            }
+        WithPerceptionTracking {
+            HStack(spacing: 2) {
+                ForEach(items, id: \.self) { it in
+                    WithPerceptionTracking {
+                        let on = it == selection
+                        Button { withAnimation(DS.select) { $selection.withSelectionFeedback().wrappedValue = it } } label: {
+                            Text(label(it))
+                                .font(.system(size: 14, weight: on ? .semibold : .regular))
+                                .foregroundStyle(on ? STVTheme.text : STVTheme.secondary)
+                                .lineLimit(1).minimumScaleFactor(0.8)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background {
+                                    if on {
+                                        RoundedRectangle(cornerRadius: 11, style: .continuous).fill(STVTheme.thumb)
+                                            .shadow(color: STVTheme.shadowThumb, radius: 3, y: 1.5)
+                                            .matchedGeometryEffect(id: "thumb", in: ns)
+                                    }
+                                }
+                                .contentShape(Rectangle())
                         }
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("\(idPrefix).\(label(it))")
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("\(idPrefix).\(label(it))")
-                .accessibilityAddTraits(on ? .isSelected : [])
             }
+            .padding(3)
+            .frame(height: 40)
+            .background(STVTheme.glass, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(STVTheme.hairline, lineWidth: 1))
         }
-        .padding(3)
-        .frame(height: 40)
-        .background(STVTheme.glass, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(STVTheme.hairline, lineWidth: 1))
     }
 }
 
@@ -212,7 +222,9 @@ struct ToneChipStyle: ButtonStyle {
     var neutral = false
     var small = false
     func makeBody(configuration: Configuration) -> some View {
-        ToneChipBody(label: configuration.label, on: on, neutral: neutral, small: small, pressed: configuration.isPressed)
+        WithPerceptionTracking {
+            ToneChipBody(label: configuration.label, on: on, neutral: neutral, small: small, pressed: configuration.isPressed)
+        }
     }
 }
 
@@ -224,22 +236,24 @@ private struct ToneChipBody<L: View>: View {
     let pressed: Bool
     @Environment(\.isEnabled) private var enabled
     var body: some View {
-        let fill: Color = on ? (neutral ? STVTheme.thumb : STVTheme.accentSoft) : (pressed ? STVTheme.glassBorder : STVTheme.glass)
-        label
-            .font(.system(size: small ? 13 : 14, weight: on ? .semibold : .regular))
-            .foregroundStyle(on ? (neutral ? STVTheme.text : STVTheme.accent) : (pressed ? STVTheme.text : STVTheme.secondary))
-            .lineLimit(1)
-            .padding(.horizontal, small ? 12 : 14)
-            .frame(height: small ? 28 : 32)
-            .background {
-                Capsule().fill(fill).shadow(color: on && neutral ? STVTheme.shadowThumb : .clear, radius: 3, y: 1.5)
-            }
-            .overlay { Capsule().strokeBorder(on && !neutral ? STVTheme.accentLine : .clear, lineWidth: 1) }
-            .contentShape(Capsule())
-            .scaleEffect(pressed ? 0.97 : 1)
-            .opacity(enabled ? 1 : 0.38)
-            .animation(DS.press, value: pressed)
-            .animation(.easeOut(duration: 0.18), value: on)
+        WithPerceptionTracking {
+            let fill: Color = on ? (neutral ? STVTheme.thumb : STVTheme.accentSoft) : (pressed ? STVTheme.glassBorder : STVTheme.glass)
+            label
+                .font(.system(size: small ? 13 : 14, weight: on ? .semibold : .regular))
+                .foregroundStyle(on ? (neutral ? STVTheme.text : STVTheme.accent) : (pressed ? STVTheme.text : STVTheme.secondary))
+                .lineLimit(1)
+                .padding(.horizontal, small ? 12 : 14)
+                .frame(height: small ? 28 : 32)
+                .background {
+                    Capsule().fill(fill).shadow(color: on && neutral ? STVTheme.shadowThumb : .clear, radius: 3, y: 1.5)
+                }
+                .overlay { Capsule().strokeBorder(on && !neutral ? STVTheme.accentLine : .clear, lineWidth: 1) }
+                .contentShape(Capsule())
+                .scaleEffect(pressed ? 0.97 : 1)
+                .opacity(enabled ? 1 : 0.38)
+                .animation(DS.press, value: pressed)
+                .animation(.easeOut(duration: 0.18), value: on)
+        }
     }
 }
 
@@ -248,9 +262,11 @@ struct CountLabel: View {
     let title: String
     let count: Int
     var body: some View {
-        HStack(spacing: 5) {
-            Text(title)
-            Text("\(count)").font(.system(size: 12, weight: .medium)).opacity(0.72)
+        WithPerceptionTracking {
+            HStack(spacing: 5) {
+                Text(title)
+                Text("\(count)").font(.system(size: 12, weight: .medium)).opacity(0.72)
+            }
         }
     }
 }
@@ -267,26 +283,28 @@ struct ChipRow<T: Hashable>: View {
     var leading: CGFloat = 16
     var idPrefix = "chip"
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(items, id: \.self) { it in
-                        Button { withAnimation(DS.select) { selection = it } } label: { Text(label(it)) }
-                            .buttonStyle(ToneChipStyle(on: it == selection, neutral: neutral(it), small: small))
-                            .id(it)
-                            .accessibilityIdentifier("\(idPrefix).\(label(it))")
-                            .accessibilityAddTraits(it == selection ? .isSelected : [])
+        WithPerceptionTracking {
+            ScrollViewReader { proxy in
+                WithPerceptionTracking {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(items, id: \.self) { it in
+                                WithPerceptionTracking {
+                                    Button { withAnimation(DS.select) { $selection.withSelectionFeedback().wrappedValue = it } } label: { Text(label(it)) }
+                                        .buttonStyle(ToneChipStyle(on: it == selection, neutral: neutral(it), small: small))
+                                        .id(it)
+                                        .accessibilityIdentifier("\(idPrefix).\(label(it))")
+                                        .accessibilityAddTraits(it == selection ? .isSelected : [])
+                                }
+                            }
+                        }
+                        .padding(.leading, leading).padding(.trailing, 24)
                     }
+                    .scrollBounceBasedOnSize(axes: .horizontal)
+                    .mask { if fade { FadeMask() } else { Color.black } }
+                    .onChangeCompat(of: selection) { _, it in withAnimation(DS.select) { proxy.scrollTo(it, anchor: .center) } }
                 }
-                .padding(.leading, leading).padding(.trailing, 24)
-                // The scroll view and the fade mask clip to the row; this margin keeps the selected neutral chip's
-                // shadow (`.chip.all.on`) inside them, and the negative padding below gives the space back.
-                .padding(.vertical, 6)
             }
-            .compatScrollBounceBasedOnSize(axes: .horizontal)
-            .mask { if fade { FadeMask() } else { Color.black } }
-            .padding(.vertical, -6)
-            .compatOnChange(of: selection) { it in withAnimation(DS.select) { proxy.scrollTo(it, anchor: .center) } }
         }
     }
 }
@@ -294,8 +312,10 @@ struct ChipRow<T: Hashable>: View {
 /// `.chips.fade`: opaque to 84 %, then fades to the right edge.
 struct FadeMask: View {
     var body: some View {
-        LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.84), .init(color: .clear, location: 1)],
-                       startPoint: .leading, endPoint: .trailing)
+        WithPerceptionTracking {
+            LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.84), .init(color: .clear, location: 1)],
+                           startPoint: .leading, endPoint: .trailing)
+        }
     }
 }
 
@@ -309,15 +329,17 @@ struct RoundIconButton: View {
     var size: CGFloat = 36
     var action: () -> Void
     var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName).font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(tone == .accent ? STVTheme.accent : tone == .overlay ? .white : STVTheme.text)
-                .frame(width: size, height: size)
-                .background(Circle().fill(tone == .accent ? STVTheme.accentSoft : tone == .overlay ? Color.black.opacity(0.30) : STVTheme.glass))
-                .overlay(Circle().strokeBorder(tone == .accent ? .clear : tone == .overlay ? Color.white.opacity(0.16) : STVTheme.hairline, lineWidth: 1))
-                .contentShape(Circle())
+        WithPerceptionTracking {
+            Button(action: action) {
+                Image(systemName: systemName).font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(tone == .accent ? STVTheme.accent : tone == .overlay ? .white : STVTheme.text)
+                    .frame(width: size, height: size)
+                    .background(Circle().fill(tone == .accent ? STVTheme.accentSoft : tone == .overlay ? Color.black.opacity(0.30) : STVTheme.glass))
+                    .overlay(Circle().strokeBorder(tone == .accent ? .clear : tone == .overlay ? Color.white.opacity(0.16) : STVTheme.hairline, lineWidth: 1))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressScale())
         }
-        .buttonStyle(PressScale())
     }
 }
 
@@ -327,15 +349,17 @@ struct CapsuleLabel: View {
     var icon: String? = nil
     var trailingIcon: String? = nil
     var body: some View {
-        HStack(spacing: 6) {
-            if let icon { Image(systemName: icon).font(.system(size: 13, weight: .semibold)).foregroundStyle(STVTheme.secondary) }
-            Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
-            if let trailingIcon { Image(systemName: trailingIcon).font(.system(size: 11, weight: .semibold)).foregroundStyle(STVTheme.secondary) }
+        WithPerceptionTracking {
+            HStack(spacing: 6) {
+                if let icon { Image(systemName: icon).font(.system(size: 13, weight: .semibold)).foregroundStyle(STVTheme.secondary) }
+                Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
+                if let trailingIcon { Image(systemName: trailingIcon).font(.system(size: 11, weight: .semibold)).foregroundStyle(STVTheme.secondary) }
+            }
+            .padding(.horizontal, 14).frame(height: 36)
+            .background(Capsule().fill(STVTheme.glass))
+            .overlay(Capsule().strokeBorder(STVTheme.hairline, lineWidth: 1))
+            .contentShape(Capsule())
         }
-        .padding(.horizontal, 14).frame(height: 36)
-        .background(Capsule().fill(STVTheme.glass))
-        .overlay(Capsule().strokeBorder(STVTheme.hairline, lineWidth: 1))
-        .contentShape(Capsule())
     }
 }
 
@@ -349,17 +373,19 @@ struct PillButtonLabel: View {
     var height: CGFloat? = nil
     var expand = false
     var body: some View {
-        let h = height ?? (small ? 32 : 48)
-        HStack(spacing: 6) {
-            if let icon { Image(systemName: icon).font(.system(size: small ? 10 : 12, weight: .bold)) }
-            Text(title).font(.system(size: small ? 13 : 16, weight: .semibold)).lineLimit(1)
+        WithPerceptionTracking {
+            let h = height ?? (small ? 32 : 48)
+            HStack(spacing: 6) {
+                if let icon { Image(systemName: icon).font(.system(size: small ? 10 : 12, weight: .bold)) }
+                Text(title).font(.system(size: small ? 13 : 16, weight: .semibold)).lineLimit(1)
+            }
+            .foregroundStyle(tone == .accent ? STVTheme.onAccent : tone == .ink ? STVTheme.bg : Color(red: 0.067, green: 0.075, blue: 0.090))
+            .padding(.horizontal, small ? 14 : 22)
+            .frame(maxWidth: expand ? .infinity : nil)
+            .frame(height: h)
+            .background(Capsule().fill(tone == .accent ? STVTheme.accent : tone == .ink ? STVTheme.text : Color.white))
+            .contentShape(Capsule())
         }
-        .foregroundStyle(tone == .accent ? STVTheme.onAccent : tone == .ink ? STVTheme.bg : Color(red: 0.067, green: 0.075, blue: 0.090))
-        .padding(.horizontal, small ? 14 : 22)
-        .frame(maxWidth: expand ? .infinity : nil)
-        .frame(height: h)
-        .background(Capsule().fill(tone == .accent ? STVTheme.accent : tone == .ink ? STVTheme.text : Color.white))
-        .contentShape(Capsule())
     }
 }
 
@@ -367,10 +393,12 @@ struct PillButtonLabel: View {
 struct PressScale: ButtonStyle {
     var scale: CGFloat = 0.96
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? scale : 1)
-            .opacity(configuration.isPressed ? 0.85 : 1)
-            .animation(DS.press, value: configuration.isPressed)
+        WithPerceptionTracking {
+            configuration.label
+                .scaleEffect(configuration.isPressed ? scale : 1)
+                .opacity(configuration.isPressed ? 0.85 : 1)
+                .animation(DS.press, value: configuration.isPressed)
+        }
     }
 }
 
@@ -381,14 +409,16 @@ struct DSNavBar<Leading: View, Trailing: View>: View {
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
     var body: some View {
-        HStack(spacing: 0) {
-            leading.frame(width: 96, alignment: .leading)
-            Text(title).font(.system(size: 17, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
-                .frame(maxWidth: .infinity)
-            trailing.frame(width: 96, alignment: .trailing)
+        WithPerceptionTracking {
+            HStack(spacing: 0) {
+                leading.frame(width: 96, alignment: .leading)
+                Text(title).font(.system(size: 17, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
+                    .frame(maxWidth: .infinity)
+                trailing.frame(width: 96, alignment: .trailing)
+            }
+            .frame(height: 44)
+            .padding(.horizontal, 16)
         }
-        .frame(height: 44)
-        .padding(.horizontal, 16)
     }
 }
 
@@ -401,7 +431,9 @@ struct DSBackButton: View {
     var tone: RoundIconButton.Tone = .glass
     var action: () -> Void
     var body: some View {
-        RoundIconButton(systemName: "chevron.left", tone: tone, action: action).accessibilityLabel("返回").accessibilityIdentifier("nav.back")
+        WithPerceptionTracking {
+            RoundIconButton(systemName: "chevron.left", tone: tone, action: action).accessibilityLabel("返回").accessibilityIdentifier("nav.back")
+        }
     }
 }
 
@@ -411,12 +443,14 @@ struct DSSearchBarLabel: View {
     var placeholder = "搜索你想看的作品"
     var ink: Color? = nil
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").font(.system(size: 17, weight: .medium))
-            Text(placeholder).font(.system(size: 16)).lineLimit(1)
-            Spacer(minLength: 0)
+        WithPerceptionTracking {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass").font(.system(size: 17, weight: .medium))
+                Text(placeholder).font(.system(size: 16)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(ink ?? STVTheme.secondary)
         }
-        .foregroundStyle(ink ?? STVTheme.secondary)
     }
 }
 
@@ -428,13 +462,15 @@ struct DSSectionHeader<Trailing: View>: View {
     var inset: CGFloat = 16
     @ViewBuilder var trailing: Trailing
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title).font(.system(size: 19, weight: .bold)).foregroundStyle(STVTheme.text)
-            if let note { Text(note).font(.system(size: 13)).foregroundStyle(STVTheme.secondary) }
-            Spacer(minLength: 0)
-            trailing
+        WithPerceptionTracking {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title).font(.system(size: 19, weight: .bold)).foregroundStyle(STVTheme.text)
+                if let note { Text(note).font(.system(size: 13)).foregroundStyle(STVTheme.secondary) }
+                Spacer(minLength: 0)
+                trailing
+            }
+            .padding(.horizontal, inset)
         }
-        .padding(.horizontal, inset)
     }
 }
 
@@ -447,12 +483,14 @@ struct MoreLabel: View {
     var title = "全部"
     var icon: String? = nil
     var body: some View {
-        HStack(spacing: 1) {
-            if let icon { Image(systemName: icon).font(.system(size: 12, weight: .medium)).padding(.trailing, 3) }
-            Text(title)
-            if icon == nil { Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)) }
+        WithPerceptionTracking {
+            HStack(spacing: 1) {
+                if let icon { Image(systemName: icon).font(.system(size: 12, weight: .medium)).padding(.trailing, 3) }
+                Text(title)
+                if icon == nil { Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)) }
+            }
+            .font(.system(size: 13)).foregroundStyle(STVTheme.secondary)
         }
-        .font(.system(size: 13)).foregroundStyle(STVTheme.secondary)
     }
 }
 
@@ -462,9 +500,11 @@ struct MoreLabel: View {
 struct DSTag: View {
     let text: String
     var body: some View {
-        Text(text).font(.system(size: 11)).foregroundStyle(STVTheme.secondary).lineLimit(1)
-            .padding(.horizontal, 7).frame(height: 20)
-            .background(STVTheme.glass, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        WithPerceptionTracking {
+            Text(text).font(.system(size: 11)).foregroundStyle(STVTheme.secondary).lineLimit(1)
+                .padding(.horizontal, 7).frame(height: 20)
+                .background(STVTheme.glass, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
     }
 }
 
@@ -474,15 +514,17 @@ struct DSStatus: View {
     let text: String
     var tone: Tone
     var body: some View {
-        let (fg, bg): (Color, Color) = switch tone {
-        case .ok: (STVTheme.ok, STVTheme.okSoft)
-        case .warn: (STVTheme.accentWarm, STVTheme.warmSoft)
-        case .muted: (STVTheme.tertiary, STVTheme.glass)
-        case .accent: (STVTheme.accent, STVTheme.accentSoft)
+        WithPerceptionTracking {
+            let (fg, bg): (Color, Color) = switch tone {
+            case .ok: (STVTheme.ok, STVTheme.okSoft)
+            case .warn: (STVTheme.accentWarm, STVTheme.warmSoft)
+            case .muted: (STVTheme.tertiary, STVTheme.glass)
+            case .accent: (STVTheme.accent, STVTheme.accentSoft)
+            }
+            Text(text).font(.system(size: 11, weight: .semibold)).foregroundStyle(fg).lineLimit(1)
+                .padding(.horizontal, 7).frame(height: 20)
+                .background(bg, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
-        Text(text).font(.system(size: 11, weight: .semibold)).foregroundStyle(fg).lineLimit(1)
-            .padding(.horizontal, 7).frame(height: 20)
-            .background(bg, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 
@@ -490,12 +532,16 @@ struct DSStatus: View {
 struct DSProgressBar: View {
     var value: Double
     var body: some View {
-        GeometryReader { g in
-            Capsule().fill(STVTheme.glassBorder)
-                .overlay(alignment: .leading) { Capsule().fill(STVTheme.accent).frame(width: g.size.width * min(max(value, 0), 1)) }
+        WithPerceptionTracking {
+            GeometryReader { g in
+                WithPerceptionTracking {
+                    Capsule().fill(STVTheme.glassBorder)
+                        .overlay(alignment: .leading) { Capsule().fill(STVTheme.accent).frame(width: g.size.width * min(max(value, 0), 1)) }
+                }
+            }
+            .frame(height: 3)
+            .animation(.easeOut(duration: 0.3), value: value)
         }
-        .frame(height: 3)
-        .animation(.easeOut(duration: 0.3), value: value)
     }
 }
 
@@ -503,10 +549,12 @@ struct DSProgressBar: View {
 struct MiniButtonLabel: View {
     let title: String
     var body: some View {
-        Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(STVTheme.accent)
-            .padding(.horizontal, 12).frame(height: 30)
-            .background(Capsule().fill(STVTheme.accentSoft))
-            .contentShape(Capsule())
+        WithPerceptionTracking {
+            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(STVTheme.accent)
+                .padding(.horizontal, 12).frame(height: 30)
+                .background(Capsule().fill(STVTheme.accentSoft))
+                .contentShape(Capsule())
+        }
     }
 }
 
@@ -516,9 +564,11 @@ struct IconWell: View {
     var size: CGFloat = 34
     var corner: CGFloat? = nil
     var body: some View {
-        Image(systemName: systemName).font(.system(size: size * 0.5, weight: .medium)).foregroundStyle(STVTheme.accent)
-            .frame(width: size, height: size)
-            .background(STVTheme.accentSoft, in: RoundedRectangle(cornerRadius: corner ?? size / 2, style: .continuous))
+        WithPerceptionTracking {
+            Image(systemName: systemName).font(.system(size: size * 0.5, weight: .medium)).foregroundStyle(STVTheme.accent)
+                .frame(width: size, height: size)
+                .background(STVTheme.accentSoft, in: RoundedRectangle(cornerRadius: corner ?? size / 2, style: .continuous))
+        }
     }
 }
 
@@ -528,15 +578,17 @@ struct IconWell: View {
 struct PosterRankNumeral: View {
     let rank: Int
     var body: some View {
-        let shadow: Color = switch rank {
-        case 1: Color(red: 1, green: 0.78, blue: 0.25)
-        case 2: Color(red: 0.68, green: 0.73, blue: 0.84)
-        case 3: Color(red: 0.86, green: 0.55, blue: 0.32)
-        default: .black
+        WithPerceptionTracking {
+            let shadow: Color = switch rank {
+            case 1: Color(red: 1, green: 0.78, blue: 0.25)
+            case 2: Color(red: 0.68, green: 0.73, blue: 0.84)
+            case 3: Color(red: 0.86, green: 0.55, blue: 0.32)
+            default: .black
+            }
+            Text("\(rank)").font(.system(size: 36, weight: .black)).italic()
+                .foregroundStyle(.white).shadow(color: shadow, radius: 0, x: 2, y: 2)
+                .padding(.leading, 7).offset(y: -3)
         }
-        Text("\(rank)").font(.system(size: 36, weight: .black)).italic()
-            .foregroundStyle(.white).shadow(color: shadow, radius: 0, x: 2, y: 2)
-            .padding(.leading, 7).offset(y: -3)
     }
 }
 
@@ -547,28 +599,30 @@ struct PosterArt: View {
     var corner: CGFloat = 12
     var showEpisodes = true
     var body: some View {
-        Color.clear
-            .aspectRatio(series.isLandscapeCover ? 16 / 9 : 3 / 4, contentMode: .fit)
-            .overlay { CoverView(url: series.cover, corner: 0) }
-            .overlay {
-                LinearGradient(stops: [.init(color: .clear, location: 0.46), .init(color: .black.opacity(0.62), location: 1)],
-                               startPoint: .top, endPoint: .bottom).allowsHitTesting(false)
-            }
-            .overlay(alignment: .topLeading) { if let rank { PosterRankNumeral(rank: rank) } }
-            .overlay(alignment: .topTrailing) {
-                if series.isNew {
-                    Text("新剧").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.white)
-                        .padding(.horizontal, 6).frame(height: 18)
-                        .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 5)).padding(6)
+        WithPerceptionTracking {
+            Color.clear
+                .aspectRatio(series.isLandscapeCover ? 16 / 9 : 3 / 4, contentMode: .fit)
+                .overlay { CoverView(url: series.cover, corner: 0) }
+                .overlay {
+                    LinearGradient(stops: [.init(color: .clear, location: 0.46), .init(color: .black.opacity(0.62), location: 1)],
+                                   startPoint: .top, endPoint: .bottom).allowsHitTesting(false)
                 }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if showEpisodes, let e = DS.episodes(series) {
-                    Text(e).font(.system(size: 11)).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
-                        .padding(.trailing, 8).padding(.bottom, 7)
+                .overlay(alignment: .topLeading) { if let rank { PosterRankNumeral(rank: rank) } }
+                .overlay(alignment: .topTrailing) {
+                    if series.isNew {
+                        Text("新剧").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 6).frame(height: 18)
+                            .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 5)).padding(6)
+                    }
                 }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    if showEpisodes, let e = DS.episodes(series) {
+                        Text(e).font(.system(size: 11)).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
+                            .padding(.trailing, 8).padding(.bottom, 7)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        }
     }
 }
 
@@ -579,20 +633,22 @@ struct PosterCellView: View {
     var subtitle: String? = nil
     @Environment(\.zoomNS) private var ns
     var body: some View {
-        NavigationLink(value: Route.series(series)) {
-            VStack(alignment: .leading, spacing: 0) {
-                PosterArt(series: series, rank: rank).zoomSource(series.id, ns)
-                Text(series.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
-                    .padding(.top, 7)
-                let sub = subtitle ?? DS.heat(series)
-                if !sub.isEmpty {
-                    Text(sub).font(.system(size: 12)).foregroundStyle(STVTheme.secondary).lineLimit(1).padding(.top, 2)
+        WithPerceptionTracking {
+            NavigationLink(value: Route.series(series)) {
+                VStack(alignment: .leading, spacing: 0) {
+                    PosterArt(series: series, rank: rank).zoomSource(series.id, ns)
+                    Text(series.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
+                        .padding(.top, 7)
+                    let sub = subtitle ?? DS.heat(series)
+                    if !sub.isEmpty {
+                        Text(sub).font(.system(size: 12)).foregroundStyle(STVTheme.secondary).lineLimit(1).padding(.top, 2)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            .buttonStyle(PressScale(scale: 0.97))
         }
-        .buttonStyle(PressScale(scale: 0.97))
     }
 }
 
@@ -602,40 +658,46 @@ struct RankListRow: View {
     let rank: Int
     @Environment(\.zoomNS) private var ns
     var body: some View {
-        NavigationLink(value: Route.series(series)) {
-            HStack(spacing: 12) {
-                Text("\(rank)").font(.system(size: 20, weight: .heavy)).italic()
-                    .foregroundStyle(STVTheme.rankColor(rank)).frame(width: 26)
-                    .minimumScaleFactor(0.6).lineLimit(1)
-                CoverView(url: series.cover, corner: 9).frame(width: 62, height: 84).zoomSource(series.id, ns)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(series.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
-                    let tags = Array((series.tags + (series.isNew ? ["新剧"] : [])).prefix(3))
-                    if !tags.isEmpty {
-                        HStack(spacing: 5) { ForEach(tags, id: \.self) { DSTag(text: $0) } }.padding(.top, 6)
-                    }
-                    HStack(spacing: 5) {
-                        if let e = DS.episodes(series) { Text(e) }
-                        if series.playCount > 0 {
-                            HStack(spacing: 2) {
-                                Image(systemName: "flame").font(.system(size: 11, weight: .semibold))
-                                Text(DS.count(series.playCount))
-                            }
-                            .fontWeight(.semibold).foregroundStyle(STVTheme.accentWarm)
+        WithPerceptionTracking {
+            NavigationLink(value: Route.series(series)) {
+                HStack(spacing: 12) {
+                    Text("\(rank)").font(.system(size: 20, weight: .heavy)).italic()
+                        .foregroundStyle(STVTheme.rankColor(rank)).frame(width: 26)
+                        .minimumScaleFactor(0.6).lineLimit(1)
+                    CoverView(url: series.cover, corner: 9).frame(width: 62, height: 84).zoomSource(series.id, ns)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(series.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
+                        let tags = Array((series.tags + (series.isNew ? ["新剧"] : [])).prefix(3))
+                        if !tags.isEmpty {
+                            HStack(spacing: 5) { ForEach(tags, id: \.self) { _stv0 in WithPerceptionTracking {
+                                DSTag(text: _stv0)
+                            } } }.padding(.top, 6)
                         }
+                        HStack(spacing: 5) {
+                            if let e = DS.episodes(series) { Text(e) }
+                            if series.playCount > 0 {
+                                HStack(spacing: 2) {
+                                    Image(systemName: "flame").font(.system(size: 11, weight: .semibold))
+                                    Text(DS.count(series.playCount))
+                                }
+                                .fontWeight(.semibold).foregroundStyle(STVTheme.accentWarm)
+                            }
+                        }
+                        .font(.system(size: 12)).foregroundStyle(STVTheme.secondary).padding(.top, 7)
                     }
-                    .font(.system(size: 12)).foregroundStyle(STVTheme.secondary).padding(.top, 7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+            .buttonStyle(PressScale(scale: 0.98))
         }
-        .buttonStyle(PressScale(scale: 0.98))
     }
 }
 
 /// Hairline separator (`+ .row { border-top }`).
 struct Hairline: View {
-    var body: some View { STVTheme.hairline.frame(height: 1) }
+    var body: some View { WithPerceptionTracking {
+        STVTheme.hairline.frame(height: 1)
+    } }
 }

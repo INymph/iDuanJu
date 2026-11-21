@@ -24,16 +24,6 @@ class PluginSubscriptionTest {
         assertEquals("example.org", PluginSubscription.apply("""{"plugins":[]}""", "https://example.org/x.json").name)
     }
 
-    @Test fun rejectForeignAndMalformedSubscriptions() {
-        for (text in listOf("{}", """{"sites":[],"spider":"https://example.org/a.jar"}""",
-            """{"sourceUrl":"https://example.org/rss","ruleArticles":"item"}""",
-            """{"plugins":{},"cms":[]}""", """{"plugins":[],"cms":null}""")) {
-            try { PluginSubscription.apply(text, "https://example.org/sub.json"); fail(text) }
-            catch (e: app.iduanju.core.plugin.PluginException) { assertEquals("E_INSTALL", e.code) }
-        }
-        assertTrue(PluginSubscription.apply("""{"plugins":[],"cms":[]}""", "https://example.org/sub.json").plugins.isEmpty())
-    }
-
     @Test fun bundleFromManifest() {
         val b = JSONObject(PluginSubscription.bundleFromManifest("""{"schema":"idj1","id":"x","entry":"main.js"}""", "export default {}"))
         assertEquals("export default {}", b.getJSONObject("files").getString("main.js"))

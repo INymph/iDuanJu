@@ -5,9 +5,6 @@ dependencies {
     api("org.json:json:20240303")
     api("org.jsoup:jsoup:1.18.3")
     implementation("org.mozilla:rhino:1.7.15")
-    // Android provides XmlPullParser; JVM tests use KXml2 (permissive notice retained).
-    compileOnly("xmlpull:xmlpull:1.1.3.1")
-    testImplementation("net.sf.kxml:kxml2:2.3.0")
     testImplementation("junit:junit:4.13.2")
 }
 tasks.test {
@@ -19,5 +16,3 @@ tasks.test {
     project.findProperty("hgDevice")?.let { systemProperty("idj.hgDevice", it.toString()) }
     testLogging { events("passed", "failed", "skipped"); showStandardStreams = true; exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
 }
-
-sourceSets.test { resources.srcDir("../../shared/legado-port") }

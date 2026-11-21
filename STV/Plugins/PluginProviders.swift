@@ -188,10 +188,7 @@ enum PluginOut {
     static func strings(_ v: Any?, max: Int = 30) -> [String] { ((v as? [Any]) ?? []).prefix(max).map { s($0, max: 60) }.filter { !$0.isEmpty } }
     static func headers(_ v: Any?) -> [String: String] {
         var out: [String: String] = [:]
-        for (k, val) in (v as? [String: Any]) ?? [:] where PluginMedia.allowedHeaders.contains(k.lowercased()) {
-            let value=s(val,max:500)
-            if !value.unicodeScalars.contains(where:{$0.value<32 || $0.value==127}) {out[k]=value}
-        }
+        for (k, val) in (v as? [String: Any]) ?? [:] where PluginMedia.allowedHeaders.contains(k.lowercased()) { out[k] = s(val, max: 500) }
         return out
     }
     static func categories(_ v: Any?) -> [PluginCategory] {
@@ -362,12 +359,10 @@ struct JSVideoProvider: SiteProvider {
         var streams: [HGStream] = []
         for (i, st) in ((o["streams"] as? [[String: Any]]) ?? []).prefix(12).enumerated() {
             let u = PluginOut.url(st["url"])
-            guard let url = URL(string: u), let host = url.host, url.scheme == "https", url.user == nil, url.password == nil, (url.port == nil || url.port == 443), media.allows(host), !NetGuard.isIPLiteral(host) else {
+            guard let url = URL(string: u), let host = url.host, url.scheme == "https", media.allows(host), !NetGuard.isIPLiteral(host) else {
                 PluginLog.add(pluginID, "✕ 丢弃未授权/非 https 的流地址 \(URL(string: u)?.host ?? u.prefix(40).description)")
                 continue
             }
-            let blocked = await Task.detached { NetGuard.resolvesToBlocked(host) }.value
-            if blocked { PluginLog.add(pluginID,"✕ 丢弃解析到内网的媒体地址");continue }
             let fmt = (st["format"] as? String) ?? (u.contains(".m3u8") ? "hls" : "mp4")
             var h = PluginOut.headers(st["headers"])
             if h["User-Agent"] == nil { h["User-Agent"] = rec.learnedUA ?? PluginHostContext.defaultUA }

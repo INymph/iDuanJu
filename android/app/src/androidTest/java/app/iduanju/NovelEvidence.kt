@@ -8,9 +8,7 @@ internal fun saveNovelEvidence(name:String, bytes:ByteArray) {
     require(name.matches(Regex("[a-z0-9.-]+")))
     val automation=InstrumentationRegistry.getInstrumentation().uiAutomation
     ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand("mkdir -p /sdcard/Download/novel-qa")).use{it.readBytes()}
-    // Android 9's dd does not support status=none; it exits early and breaks
-    // UiAutomation's stdin pipe, terminating the instrumentation connection.
-    val pipes=automation.executeShellCommandRw("dd of=/sdcard/Download/novel-qa/$name")
+    val pipes=automation.executeShellCommandRw("dd of=/sdcard/Download/novel-qa/$name status=none")
     ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use{it.write(bytes)}
     ParcelFileDescriptor.AutoCloseInputStream(pipes[0]).use{it.readBytes()}
 }

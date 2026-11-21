@@ -8,12 +8,15 @@
 
 请前往 [Releases 页面](https://github.com/my-name-is-alan/iDuanJu/releases) 下载。
 
-## 播放内核（AetherEngine）
+## iOS 16 / TrollStore 分支
 
-- 默认使用 **AetherEngine 7.62.0**（LGPL-3.0，附 App Store / DRM 例外条款），以 SwiftPM 静态链接、未修改。
-- 它带的 **FFmpeg（LGPL-2.1，未启用 GPL / version3 组件）** 及 libzvbi、dav1d、zimg 以**动态框架**形式放在
-  `STV.app/Frameworks/AetherLib*.framework`，没有并入主程序，可以替换 / 重新链接。各组件许可全文见
-  `STV/Resources/Licenses/` 和 App 内「开源许可」，详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+此分支移除 AetherEngine，统一使用兼容 iOS 16 的系统 AVPlayer，并回移新版 SwiftUI API。
+目标设备：iOS 16.6，已安装 TrollStore。原有 FFmpeg 专属格式支持不再保留。
+
+构建流程、限制和验证状态见 [iOS 16 构建说明](docs/IOS16-TROLLSTORE.md)。
+GitHub Actions 工作流：**iOS 16 TrollStore IPA**；产物：`iDuanJu-iOS16-TrollStore.ipa`。
+
+注意：下方上游 Releases 中的原版 IPA 不包含本分支修改。
 
 ## 免责声明
 

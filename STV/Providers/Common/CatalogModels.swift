@@ -5,7 +5,7 @@ import Foundation
 struct DramaSource: RawRepresentable, Hashable, Codable, Identifiable, Sendable {
     let rawValue: String
     init?(rawValue: String) {
-        guard rawValue == "legado" || Self.builtins.contains(where: { $0.rawValue == rawValue })
+        guard Self.builtins.contains(where: { $0.rawValue == rawValue })
                 || (rawValue.hasPrefix("p.") && rawValue.count > 2) || (rawValue.hasPrefix("cms.") && rawValue.count > 4) else { return nil }
         self.rawValue = rawValue
     }
@@ -21,7 +21,6 @@ struct DramaSource: RawRepresentable, Hashable, Codable, Identifiable, Sendable 
     static let xvideos = DramaSource("xvideos")
     static let xnxx = DramaSource("xnxx")
     static let pornhub = DramaSource("pornhub")
-    static let legado = DramaSource("legado")
     static let telegram = DramaSource("telegram")
     static let builtins: [DramaSource] = [.hongguo, .huangguo, .jable, .missav, .hanime1, .supjav, .eporner, .xvideos, .xnxx, .pornhub, .telegram]
 
@@ -46,7 +45,6 @@ struct DramaSource: RawRepresentable, Hashable, Codable, Identifiable, Sendable 
         case .xvideos: "XVideos"
         case .xnxx: "XNXX"
         case .pornhub: "Pornhub"
-        case .legado: "视频书"
         case .telegram: "Telegram"
         default:
             if let p = pluginID { PluginStore.snapshot(p)?.manifest.name ?? "插件（已移除）" }

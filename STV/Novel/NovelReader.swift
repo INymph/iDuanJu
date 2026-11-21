@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import UIKit
 import AVFoundation
@@ -150,11 +151,10 @@ struct NovelPagedView: UIViewControllerRepresentable {
 /// tap the middle or swipe up for the toolbar (目录 · 书籍 · 进度 · 亮度 · 字体) and 听书.
 struct NovelReaderView: View {
     @State private var book: NovelBook
-    @Environment(\.layoutMetrics) private var layout
-    @ObservedObject private var store = NovelStore.shared
-    @ObservedObject private var prefs = NovelPrefs.shared
-    @ObservedObject private var fonts = NovelFonts.shared
-    @ObservedObject private var loader = NovelWebLoader.shared
+    private let store = NovelStore.shared
+    @State private var prefs = NovelPrefs.shared
+    @State private var fonts = NovelFonts.shared
+    @State private var loader = NovelWebLoader.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var paginator: NovelPaginator
@@ -168,7 +168,7 @@ struct NovelReaderView: View {
     @State private var hint = true
     @State private var lastLight: NovelPrefs.Theme = .white
     @State private var autoTurn = false
-    @StateObject private var speaker = NovelSpeaker()
+    @State private var speaker = NovelSpeaker()
     @State private var opened = Date()
     @State private var brightness = 0.5
     @State private var tocSearch = false
@@ -193,87 +193,91 @@ struct NovelReaderView: View {
     private func title(_ i: Int) -> String { book.chapters.indices.contains(i) ? book.chapters[i].title : "" }
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .bottom) {
-                pal.bg.ignoresSafeArea()
-                if ready {
-                    Group {
-                        if prefs.turn == .scroll {
-                            scrollReader(geo)
-                        } else {
-                            NovelPagedView(paginator: paginator, handle: handle, start: ref, style: prefs.turn, insets: insets,
-                                highlight: highlight, version: version,
-                                onPage: { r in ref = r; save() },
-                                onCenter: { menu ? hideMenu() : showMenu() },
-                                onSwipeUp: { showMenu() })
-                                .ignoresSafeArea()
+        WithPerceptionTracking {
+            GeometryReader { geo in
+                WithPerceptionTracking {
+                    ZStack(alignment: .bottom) {
+                        pal.bg.ignoresSafeArea()
+                        if ready {
+                            if prefs.turn == .scroll {
+                                scrollReader(geo)
+                            } else {
+                                NovelPagedView(paginator: paginator, handle: handle, start: ref, style: prefs.turn, insets: insets,
+                                    highlight: highlight, version: version,
+                                    onPage: { r in ref = r; save() },
+                                    onCenter: { menu ? hideMenu() : showMenu() },
+                                    onSwipeUp: { showMenu() })
+                                    .ignoresSafeArea()
+                            }
+                        }
+                        if hint && !menu {
+                            Text("↑上滑显示工具栏").font(.system(size: 12)).foregroundStyle(pal.secondary)
+                                .padding(.bottom, 8).transition(.opacity).allowsHitTesting(false)
+                        }
+                        if book.isWeb, let err = loader.error(book, ref.chapter), !menu {
+                            Button { loader.retry(book, ref.chapter) } label: {
+                                Label("重新加载本章", systemImage: "arrow.clockwise").font(.system(size: 14, weight: .medium))
+                                    .padding(.horizontal, 16).frame(height: 40).background(Capsule().fill(pal.panel))
+                            }
+                            .buttonStyle(.plain).foregroundStyle(pal.ink).padding(.bottom, 90)
+                            .accessibilityHint(err)
+                            .accessibilityIdentifier("novel.retry")
+                        }
+                        if speaker.active && !menu { miniPlayer.padding(.trailing, 16).padding(.bottom, 40).frame(maxWidth: .infinity, alignment: .trailing) }
+                        if menu { menuLayer.transition(.opacity) }
+                    }
+                    .onAppear {
+                        configure(geo); restore(); brightness = Double(screen?.brightness ?? 0.5)
+                        if book.isWeb {
+                            loader.prefetch(book, around: ref.chapter)
+                            Task { _ = try? await loader.refreshToc(book) }
                         }
                     }
-                    .frame(maxWidth: layout.readerMaxWidth)
-                    .frame(maxWidth: .infinity)
+                    .onChangeCompat(of: layoutKey(geo)) { _, _ in relayout(geo) }
+                    .onChangeCompat(of: book.id) { _, _ in configure(geo); restore(); if book.isWeb { loader.prefetch(book, around: ref.chapter) } }
                 }
-                if hint && !menu {
-                    Text("↑上滑显示工具栏").font(.system(size: 12)).foregroundStyle(pal.secondary)
-                        .padding(.bottom, 8).transition(.opacity).allowsHitTesting(false)
-                }
-                if book.isWeb, let err = loader.error(book, ref.chapter), !menu {
-                    Button { loader.retry(book, ref.chapter) } label: {
-                        Label("重新加载本章", systemImage: "arrow.clockwise").font(.system(size: 14, weight: .medium))
-                            .padding(.horizontal, 16).frame(height: 40).background(Capsule().fill(pal.panel))
+            }
+            .statusBarHidden(!menu)
+            .sheet(isPresented: $showDownloads) { WithPerceptionTracking {
+                NovelDownloadView(book: book, chapter: ref.chapter)
+            } }
+            .sheet(isPresented: $showSources) {
+                WithPerceptionTracking {
+                    if let sourceURL = book.sourceURL, let bookURL = book.bookURL {
+                        NavigationStack {
+                            NovelWebDetailView(items: [LegadoSearchItem(name: book.title, author: book.author ?? "", kind: "", intro: "", cover: book.coverURL ?? "", latest: "", bookURL: bookURL, sourceURL: sourceURL, sourceName: LegadoSourceStore.shared.source(sourceURL)?.bookSourceName ?? "当前来源")], onRead: { replacement in
+                                showSources = false
+                                speaker.stop()
+                                book = replacement
+                                paginator = NovelPaginator(book: replacement)
+                                ref = NovelPageRef(chapter: store.progress[replacement.id]?.chapter ?? 0, index: 0)
+                                ready = false; version += 1
+                            }, resumeFrom: book)
+                        }
                     }
-                    .buttonStyle(.plain).foregroundStyle(pal.ink).padding(.bottom, 90)
-                    .accessibilityHint(err)
-                    .accessibilityIdentifier("novel.retry")
-                }
-                if speaker.active && !menu { miniPlayer.padding(.trailing, 16).padding(.bottom, 40).frame(maxWidth: .infinity, alignment: .trailing) }
-                if menu { menuLayer.transition(.opacity) }
-            }
-            .onAppear {
-                configure(geo); restore(); brightness = Double(screen?.brightness ?? 0.5)
-                if book.isWeb {
-                    loader.prefetch(book, around: ref.chapter)
-                    Task { _ = try? await loader.refreshToc(book) }
                 }
             }
-            .compatOnChange(of: layoutKey(geo)) { relayout(geo) }
-            .compatOnChange(of: book.id) { configure(geo); restore(); if book.isWeb { loader.prefetch(book, around: ref.chapter) } }
-        }
-        .statusBarHidden(!menu)
-        .sheet(isPresented: $showDownloads) { NovelDownloadView(book: book, chapter: ref.chapter) }
-        .sheet(isPresented: $showSources) {
-            if let sourceURL = book.sourceURL, let bookURL = book.bookURL {
-                NavigationStack {
-                    NovelWebDetailView(items: [LegadoSearchItem(name: book.title, author: book.author ?? "", kind: "", intro: "", cover: book.coverURL ?? "", latest: "", bookURL: bookURL, sourceURL: sourceURL, sourceName: LegadoSourceStore.shared.source(sourceURL)?.bookSourceName ?? "当前来源")], onRead: { replacement in
-                        showSources = false
-                        speaker.stop()
-                        book = replacement
-                        paginator = NovelPaginator(book: replacement)
-                        ref = NovelPageRef(chapter: store.progress[replacement.id]?.chapter ?? 0, index: 0)
-                        ready = false; version += 1
-                    }, resumeFrom: book)
-                }
+            .preferredColorScheme(prefs.theme == .night ? .dark : .light)
+            .onChangeCompat(of: speaker.sentence) { _, s in if let s { follow(s) } }
+            .onChangeCompat(of: loader.revision) { _, _ in
+                guard book.isWeb else { return }
+                let c = ref.chapter, o = offsetInChapter
+                paginator.invalidate()
+                ref = paginator.ref(chapter: c, offset: o)
+                version += 1
             }
-        }
-        .preferredColorScheme(prefs.theme == .night ? .dark : .light)
-        .compatOnChange(of: speaker.sentence) { s in if let s { follow(s) } }
-        .compatOnChange(of: loader.revision) {
-            guard book.isWeb else { return }
-            let c = ref.chapter, o = offsetInChapter
-            paginator.invalidate()
-            ref = paginator.ref(chapter: c, offset: o)
-            version += 1
-        }
-        .compatOnChange(of: ref.chapter) { c in if book.isWeb { loader.prefetch(book, around: c) } }
-        .onDisappear { loader.cancelPrefetch(book); store.addReadTime(book, Date().timeIntervalSince(opened)); speaker.stop() }
-        .task {
-            // WeRead shows the hint briefly when a book opens.
-            try? await Task.sleep(for: .seconds(3))
-            withAnimation(.easeOut(duration: 0.6)) { hint = false }
-        }
-        .task(id: autoTurn) {
-            while autoTurn, !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
-                if autoTurn, !menu { handle.controller?.turn(+1) }
+            .onChangeCompat(of: ref.chapter) { _, c in if book.isWeb { loader.prefetch(book, around: c) } }
+            .onDisappear { loader.cancelPrefetch(book); store.addReadTime(book, Date().timeIntervalSince(opened)); speaker.stop() }
+            .task {
+                // WeRead shows the hint briefly when a book opens.
+                try? await Task.sleep(for: .seconds(3))
+                withAnimation(.easeOut(duration: 0.6)) { hint = false }
+            }
+            .task(id: autoTurn) {
+                while autoTurn, !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(15))
+                    if autoTurn, !menu { handle.controller?.turn(+1) }
+                }
             }
         }
     }
@@ -311,32 +315,38 @@ struct NovelReaderView: View {
 
     private func scrollReader(_ geo: GeometryProxy) -> some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 36) {
-                    ForEach(book.chapters.indices, id: \.self) { i in
-                        NovelTextView(text: scrollText(i))
-                            .id(i)
-                            .compatOnFrame(in: .named("novel.scroll")) { f in
-                            trackScroll(i, f)
+            WithPerceptionTracking {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 36) {
+                        WithPerceptionTracking {
+                            ForEach(book.chapters.indices, id: \.self) { i in
+                                WithPerceptionTracking {
+                                    NovelTextView(text: scrollText(i))
+                                        .id(i)
+                                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("novel.scroll")) } action: { f in
+                                        trackScroll(i, f)
+                                    }
+                                }
+                            }
                         }
                     }
+                    .padding(.horizontal, hMargin).padding(.top, 36).padding(.bottom, 80)
                 }
-                .padding(.horizontal, hMargin).padding(.top, 36).padding(.bottom, 80)
-            }
-            .coordinateSpace(name: "novel.scroll")
-            .scrollIndicators(.hidden)
-            .overlay(alignment: .topLeading) {
-                Text(title(ref.chapter)).font(.system(size: 12)).foregroundStyle(pal.secondary)
-                    .padding(.horizontal, hMargin).frame(maxWidth: .infinity, minHeight: 28, alignment: .leading).background(pal.bg)
-            }
-            .onAppear { proxy.scrollTo(ref.chapter, anchor: .top) }
-            .compatOnChange(of: version) { proxy.scrollTo(ref.chapter, anchor: .top) }
-            .onTapGesture { menu ? hideMenu() : showMenu() }
-            .compatOnChange(of: speaker.sentence) { s in
-                // 听书 in scroll mode: keep the sentence on screen (anchor at the same relative position).
-                guard let s, book.chapters.indices.contains(speaker.chapter) else { return }
-                let len = max(1, book.chapters[speaker.chapter].length)
-                withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(speaker.chapter, anchor: UnitPoint(x: 0, y: min(1, Double(s.location) / Double(len)))) }
+                .coordinateSpace(name: "novel.scroll")
+                .scrollIndicators(.hidden)
+                .overlay(alignment: .topLeading) {
+                    Text(title(ref.chapter)).font(.system(size: 12)).foregroundStyle(pal.secondary)
+                        .padding(.horizontal, hMargin).frame(maxWidth: .infinity, minHeight: 28, alignment: .leading).background(pal.bg)
+                }
+                .onAppear { proxy.scrollTo(ref.chapter, anchor: .top) }
+                .onChangeCompat(of: version) { _, _ in proxy.scrollTo(ref.chapter, anchor: .top) }
+                .onTapGesture { menu ? hideMenu() : showMenu() }
+                .onChangeCompat(of: speaker.sentence) { _, s in
+                    // 听书 in scroll mode: keep the sentence on screen (anchor at the same relative position).
+                    guard let s, book.chapters.indices.contains(speaker.chapter) else { return }
+                    let len = max(1, book.chapters[speaker.chapter].length)
+                    withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(speaker.chapter, anchor: UnitPoint(x: 0, y: min(1, Double(s.location) / Double(len)))) }
+                }
             }
         }
     }
@@ -382,7 +392,7 @@ struct NovelReaderView: View {
                 toolbar
             }
             .background(pal.panel.ignoresSafeArea(edges: .bottom))
-            .clipShape(CompatUnevenRoundedRectangle(topLeadingRadius: tab == nil ? 0 : 16, topTrailingRadius: tab == nil ? 0 : 16))
+            .clipShape(CornerRectangle(topLeadingRadius: tab == nil ? 0 : 16, topTrailingRadius: tab == nil ? 0 : 16))
             .shadow(color: .black.opacity(tab == nil ? 0.04 : 0.10), radius: 8, y: -2)
         }
     }
@@ -504,13 +514,15 @@ struct NovelReaderView: View {
             Text("颜色").font(.system(size: 12)).foregroundStyle(pal.secondary)
             HStack(spacing: 12) {
                 ForEach(NovelPrefs.Theme.allCases, id: \.self) { t in
-                    let on = t == prefs.theme
-                    RoundedRectangle(cornerRadius: 10).fill(NovelLayout.palette(t).bg)
-                        .overlay { if t == .night { Image(systemName: "moon.fill").foregroundStyle(Color(hex: 0x4D7CFE)) } }
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(on ? NovelLayout.accent : .black.opacity(0.06), lineWidth: on ? 1.5 : 1))
-                        .frame(height: 40)
-                        .onTapGesture { prefs.theme = t }
-                        .accessibilityIdentifier("novel.theme.\(t.rawValue)")
+                    WithPerceptionTracking {
+                        let on = t == prefs.theme
+                        RoundedRectangle(cornerRadius: 10).fill(NovelLayout.palette(t).bg)
+                            .overlay { if t == .night { Image(systemName: "moon.fill").foregroundStyle(Color(hex: 0x4D7CFE)) } }
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(on ? NovelLayout.accent : .black.opacity(0.06), lineWidth: on ? 1.5 : 1))
+                            .frame(height: 40)
+                            .onTapGesture { prefs.theme = t }
+                            .accessibilityIdentifier("novel.theme.\(t.rawValue)")
+                    }
                 }
             }
         }
@@ -554,7 +566,9 @@ struct NovelReaderView: View {
             subHeader("字体样式")
             ScrollView {
                 VStack(spacing: 0) {
-                    ForEach(NovelFonts.all) { f in fontRow(f) }
+                    ForEach(NovelFonts.all) { f in WithPerceptionTracking {
+                        fontRow(f)
+                    } }
                 }
             }
             .frame(maxHeight: 330)
@@ -593,13 +607,17 @@ struct NovelReaderView: View {
         VStack(alignment: .leading, spacing: 14) {
             subHeader("翻页方式")
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
-                ForEach(NovelTurnStyle.allCases) { t in
-                    chip(t.label, on: prefs.turn == t, id: "novel.turn.\(t.rawValue)") {
-                        let c = ref.chapter, o = offsetInChapter
-                        prefs.turn = t
-                        autoTurn = false
-                        ref = paginator.ref(chapter: c, offset: o)
-                        version += 1
+                WithPerceptionTracking {
+                    ForEach(NovelTurnStyle.allCases) { t in
+                        WithPerceptionTracking {
+                            chip(t.label, on: prefs.turn == t, id: "novel.turn.\(t.rawValue)") {
+                                let c = ref.chapter, o = offsetInChapter
+                                prefs.turn = t
+                                autoTurn = false
+                                ref = paginator.ref(chapter: c, offset: o)
+                                version += 1
+                            }
+                        }
                     }
                 }
             }
@@ -665,28 +683,36 @@ struct NovelReaderView: View {
             }
             .foregroundStyle(pal.ink).padding(3).background(Capsule().fill(pal.track.opacity(0.7)))
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        if tocSearch {
-                            ForEach(hits.indices, id: \.self) { i in
-                                let h = hits[i]
-                                Button { jump(chapter: h.chapter, offset: h.offset) } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(title(h.chapter)).font(.system(size: 12)).foregroundStyle(pal.secondary)
-                                        Text(h.snippet).font(.system(size: 15)).foregroundStyle(pal.ink).lineLimit(2)
+                WithPerceptionTracking {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            WithPerceptionTracking {
+                                if tocSearch {
+                                    ForEach(hits.indices, id: \.self) { i in
+                                        WithPerceptionTracking {
+                                            let h = hits[i]
+                                            Button { jump(chapter: h.chapter, offset: h.offset) } label: {
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text(title(h.chapter)).font(.system(size: 12)).foregroundStyle(pal.secondary)
+                                                    Text(h.snippet).font(.system(size: 15)).foregroundStyle(pal.ink).lineLimit(2)
+                                                }
+                                                .padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                                            }
+                                            .buttonStyle(.plain)
+                                            Divider()
+                                        }
                                     }
-                                    .padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                                    if hits.isEmpty, !query.isEmpty { Text("没有找到").foregroundStyle(pal.secondary).padding(.top, 20) }
+                                } else {
+                                    ForEach(book.chapters.indices, id: \.self) { i in WithPerceptionTracking {
+                                        tocRow(i)
+                                    } }
                                 }
-                                .buttonStyle(.plain)
-                                Divider()
                             }
-                            if hits.isEmpty, !query.isEmpty { Text("没有找到").foregroundStyle(pal.secondary).padding(.top, 20) }
-                        } else {
-                            ForEach(book.chapters.indices, id: \.self) { i in tocRow(i) }
                         }
                     }
+                    .onAppear { proxy.scrollTo(ref.chapter, anchor: .center) }
                 }
-                .onAppear { proxy.scrollTo(ref.chapter, anchor: .center) }
             }
         }
         .frame(height: 460)
@@ -732,7 +758,7 @@ struct NovelReaderView: View {
     /// While reading aloud with the menu closed: state + play / pause, tap to open the 听书 panel.
     private var miniPlayer: some View {
         HStack(spacing: 10) {
-            Image(systemName: "waveform").compatSymbolVariableColor(isActive: !speaker.paused)
+            Image(systemName: "waveform").opacity(speaker.paused ? 0.45 : 1)
                 .font(.system(size: 15)).foregroundStyle(NovelLayout.accent)
             Text(speaker.paused ? "已暂停" : "朗读中").font(.system(size: 13, weight: .medium)).foregroundStyle(pal.ink)
             Button { speaker.toggle() } label: {
@@ -778,12 +804,16 @@ struct NovelReaderView: View {
             }
             optionRow("语速") {
                 ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { v in
-                    chip(v == 1 ? "1.0x" : "\(v.formatted())x", on: abs(speaker.speed - v) < 0.01) { speaker.speed = v }
+                    WithPerceptionTracking {
+                        chip(v == 1 ? "1.0x" : "\(v.formatted())x", on: abs(speaker.speed - v) < 0.01) { speaker.speed = v }
+                    }
                 }
             }
             optionRow("定时") {
                 chip("关闭", on: speaker.sleep == .off) { speaker.sleep = .off }
-                ForEach([15, 30, 60], id: \.self) { m in chip("\(m)分钟", on: speaker.sleep == .minutes(m)) { speaker.sleep = .minutes(m) } }
+                ForEach([15, 30, 60], id: \.self) { m in WithPerceptionTracking {
+                    chip("\(m)分钟", on: speaker.sleep == .minutes(m)) { speaker.sleep = .minutes(m) }
+                } }
                 chip("本章结束", on: speaker.sleep == .chapterEnd) { speaker.sleep = .chapterEnd }
             }
             if let until = speaker.sleepUntil {
@@ -792,8 +822,10 @@ struct NovelReaderView: View {
             HStack(spacing: 10) {
                 Text("音色").font(.system(size: 13)).foregroundStyle(pal.secondary).frame(width: 34, alignment: .leading)
                 Menu {
-                    Picker("音色", selection: Binding(get: { current?.identifier ?? "" }, set: { speaker.voiceID = $0 })) {
-                        ForEach(voices, id: \.identifier) { v in Text(NovelSpeaker.label(v)).tag(v.identifier) }
+                    Picker("音色", selection: Binding(get: { current?.identifier ?? "" }, set: { speaker.voiceID = $0 }).withSelectionFeedback()) {
+                        ForEach(voices, id: \.identifier) { v in WithPerceptionTracking {
+                            Text(NovelSpeaker.label(v)).tag(v.identifier)
+                        } }
                     }
                 } label: {
                     HStack { Text(current.map(NovelSpeaker.label) ?? "系统默认").lineLimit(1); Spacer(); Image(systemName: "chevron.up.chevron.down").font(.system(size: 11)) }
@@ -922,32 +954,36 @@ struct PillSlider: View {
     var trailing: AnyView? = nil
 
     var body: some View {
-        GeometryReader { g in
-            let h: CGFloat = g.size.height
-            let d: CGFloat = h - 6
-            let x: CGFloat = 3 + (g.size.width - d - 6) * CGFloat(value.clamped)
-            ZStack(alignment: .leading) {
-                Capsule().fill(track)
-                HStack {
-                    leading.padding(.leading, 16)
-                    Spacer()
-                    trailing.padding(.trailing, 16)
+        WithPerceptionTracking {
+            GeometryReader { g in
+                WithPerceptionTracking {
+                    let h: CGFloat = g.size.height
+                    let d: CGFloat = h - 6
+                    let x: CGFloat = 3 + (g.size.width - d - 6) * CGFloat(value.clamped)
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(track)
+                        HStack {
+                            leading.padding(.leading, 16)
+                            Spacer()
+                            trailing.padding(.trailing, 16)
+                        }
+                        Circle().fill(thumb).shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+                            .overlay { if let label { Text(label).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary) } }
+                            .frame(width: d, height: d)
+                            .offset(x: x)
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0).onChanged { v in
+                            value = ((v.location.x - d / 2 - 3) / (g.size.width - d - 6)).clamped
+                    })
                 }
-                Circle().fill(thumb).shadow(color: .black.opacity(0.12), radius: 3, y: 1)
-                    .overlay { if let label { Text(label).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary) } }
-                    .frame(width: d, height: d)
-                    .offset(x: x)
             }
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { v in
-                    value = ((v.location.x - d / 2 - 3) / (g.size.width - d - 6)).clamped
-            })
-        }
-        .frame(height: 44)
-        .accessibilityElement()
-        .accessibilityValue(label ?? "\(Int(value * 100))%")
-        .accessibilityAdjustableAction { dir in
-            value = (value + (dir == .increment ? 0.05 : -0.05)).clamped
+            .frame(height: 44)
+            .accessibilityElement()
+            .accessibilityValue(label ?? "\(Int(value * 100))%")
+            .accessibilityAdjustableAction { dir in
+                value = (value + (dir == .increment ? 0.05 : -0.05)).clamped
+            }
         }
     }
 }

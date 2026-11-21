@@ -11,24 +11,6 @@ object DecoderCaps {
     private val infos by lazy { runCatching { MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { !it.isEncoder } }.getOrDefault(emptyList()) }
     private val memo = HashMap<String, Boolean>()
 
-    /**
-     * Enable Jellyfin FFmpeg extension renderers as fallback (`EXTENSION_RENDERER_MODE_ON`) so hardware
-     * codecs still handle HEVC / HDR10 / Dolby Vision while FFmpeg transparently decodes DTS, TrueHD,
-     * AC3, E-AC3, and other surround/lossless audio tracks.
-     * Android 9 x86 images can crash the entire OMX service on HE-AAC v2 in the Google AAC decoder.
-     */
-    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-    fun renderers(context: android.content.Context): androidx.media3.exoplayer.DefaultRenderersFactory {
-        val preferExtension = android.os.Build.VERSION.SDK_INT == 28 &&
-            android.os.Build.SUPPORTED_ABIS.any { it.startsWith("x86") }
-        return androidx.media3.exoplayer.DefaultRenderersFactory(context)
-            .setEnableDecoderFallback(true)
-            .setExtensionRendererMode(
-                if (preferExtension) androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
-                else androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON,
-            )
-    }
-
     fun mime(codec: String): String? = when (codec.lowercase()) {
         "bytevc1", "hevc", "h265", "hvc1", "hev1" -> "video/hevc"
         "h264", "avc1", "avc" -> "video/avc"

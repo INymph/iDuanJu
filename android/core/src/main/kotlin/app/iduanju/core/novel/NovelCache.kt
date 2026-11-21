@@ -72,7 +72,7 @@ class NovelCache(private val root: File) {
     }
     fun books(): List<Saved> = root.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull { directory ->
         runCatching { val j=JSONObject(File(directory,"book.json").readText());val a=j.getJSONArray("chapters")
-            val toc=(0 until a.length()).map { a.getJSONObject(it).let { c -> NovelChapter(c.getString("title"),c.getString("url"),it) } }
+            val toc=(0 until a.length()).map { a.getJSONObject(it).let { c -> NovelChapter(c.getString("title"),c.getString("url")) } }
             val info=j.optJSONObject("info")?.let{NovelBookDetails(it.optString("name"),it.optString("author"),it.optString("intro"),it.optString("cover"),it.optString("kind"),it.optString("latest"),toc)}
             Saved(j.getString("source"),NovelHit(j.getString("name"),j.optString("author"),j.getString("url"),j.optString("cover")),toc,info,j.optLong("addedAt",0))
         }.getOrNull()

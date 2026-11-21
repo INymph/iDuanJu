@@ -108,88 +108,30 @@ fun DetailScreen(seriesId: String, onBack: () -> Unit, onPlay: (String, Int) -> 
     val startEp = resume?.episodeNumber ?: d?.episodes?.firstOrNull()?.ep ?: 1
     val playTitle = if (resume != null) "继续第 ${resume.episodeNumber} 集" else "开始播放"
 
-    val metrics = LocalLayoutMetrics.current
-    val useTwoPane = metrics.tier == SizeTier.Expanded && d != null
-    Box(Modifier.fillMaxSize().background(c.bg), contentAlignment = Alignment.TopCenter) {
-        if (useTwoPane) {
-            val dd = d!!
-            Row(
-                Modifier
-                    .widthIn(max = 1160.dp)
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .padding(top = 56.dp, start = 28.dp, end = 28.dp, bottom = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(28.dp),
-            ) {
-                Column(
-                    Modifier
-                        .width(340.dp)
-                        .fillMaxHeight()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    val eps = "全 ${maxOf(dd.totalEps, dd.episodes.size)} 集"
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(3f / 4f)
-                            .heightIn(max = 420.dp)
-                            .shadow(18.dp, RoundedCornerShape(20.dp), ambientColor = Color.Black.copy(0.45f), spotColor = Color.Black.copy(0.45f)),
-                    ) {
-                        PosterArt(dd.cover, Modifier.fillMaxSize(), corner = 20.dp)
-                    }
-                    DSStatus(dd.source.ifEmpty { "红果短剧" }, StatusTone.Accent)
-                    Text(dd.title, color = c.text, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 30.sp)
-                    val meta = listOfNotNull(if (dd.episodeLabel.isEmpty()) eps else DS.spaced(dd.episodeLabel), dd.author.ifEmpty { null }).joinToString(" · ")
-                    if (meta.isNotEmpty()) Text(meta, color = c.secondary, fontSize = 13.sp)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        PillButton(playTitle, Modifier.weight(1f), icon = Icons.Filled.PlayArrow, tone = PillTone.Ink) { onPlay(seriesId, startEp) }
-                        Heart(seriesId, dd, 48.dp)
-                    }
+    Box(Modifier.fillMaxSize().background(c.bg)) {
+        Column(Modifier.fillMaxSize().verticalScroll(scroll).navigationBarsPadding().padding(bottom = 110.dp)) {
+            DetailHero(d, seriesId)
+            val dd = d
+            when {
+                dd != null -> DetailBody(dd, seriesId, resume, group, { group = it }, onPlay, onOpenSeries, playTitle, startEp) { actionsBottom = it }
+                err != null -> Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(err!!, color = c.secondary, fontSize = 14.sp, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(12.dp))
+                    MiniButton("重试") { reload++ }
                 }
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .verticalScroll(scroll)
-                        .padding(bottom = 48.dp),
-                ) {
-                    DetailBody(dd, seriesId, resume, group, { group = it }, onPlay, onOpenSeries, playTitle, startEp) { actionsBottom = it }
-                }
-            }
-        } else {
-            Column(
-                Modifier
-                    .then(if (metrics.detailMaxWidth != androidx.compose.ui.unit.Dp.Unspecified) Modifier.widthIn(max = metrics.detailMaxWidth) else Modifier)
-                    .fillMaxSize()
-                    .verticalScroll(scroll)
-                    .navigationBarsPadding()
-                    .padding(bottom = 110.dp),
-            ) {
-                DetailHero(d, seriesId)
-                val dd = d
-                when {
-                    dd != null -> DetailBody(dd, seriesId, resume, group, { group = it }, onPlay, onOpenSeries, playTitle, startEp) { actionsBottom = it }
-                    err != null -> Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(err!!, color = c.secondary, fontSize = 14.sp, textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(12.dp))
-                        MiniButton("重试") { reload++ }
-                    }
-                    else -> Column(Modifier.padding(horizontal = 20.dp).padding(top = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Box(Modifier.fillMaxWidth().height(66.dp).clip(RoundedCornerShape(16.dp)).background(c.glass))
-                        repeat(3) { Box(Modifier.fillMaxWidth().height(16.dp).clip(RoundedCornerShape(4.dp)).background(c.glass)) }
-                    }
+                else -> Column(Modifier.padding(horizontal = 20.dp).padding(top = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.fillMaxWidth().height(66.dp).clip(RoundedCornerShape(16.dp)).background(c.glass))
+                    repeat(3) { Box(Modifier.fillMaxWidth().height(16.dp).clip(RoundedCornerShape(4.dp)).background(c.glass)) }
                 }
             }
         }
         // pinned nav (`.pin` + `.nav`)
-        Box(Modifier.fillMaxWidth().dsPinned(pinned || useTwoPane)) {
-            DSNavBar(d?.title ?: "", Modifier.statusBarsPadding().padding(bottom = 6.dp), titleAlpha = animateFloatAsState(if (pinned || useTwoPane) 1f else 0f, label = "t").value,
-                leading = { BackButton(if (pinned || useTwoPane) Tone.Glass else Tone.Overlay, onBack) })
+        Box(Modifier.fillMaxWidth().dsPinned(pinned)) {
+            DSNavBar(d?.title ?: "", Modifier.statusBarsPadding().padding(bottom = 6.dp), titleAlpha = animateFloatAsState(if (pinned) 1f else 0f, label = "t").value,
+                leading = { BackButton(if (pinned) Tone.Glass else Tone.Overlay, onBack) })
         }
         // floating play bar (`.playbar`)
-        AnimatedVisibility(!useTwoPane && d?.episodes?.isNotEmpty() == true && actionsOut, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 4.dp),
+        AnimatedVisibility(d?.episodes?.isNotEmpty() == true && actionsOut, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 4.dp),
             enter = slideInVertically(DS.panel()) { it } + fadeIn(), exit = slideOutVertically(DS.panel()) { it } + fadeOut()) {
             Row(Modifier.fillMaxWidth().dsBar(32.dp).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 PillButton(playTitle, Modifier.weight(1f), icon = Icons.Filled.PlayArrow, tone = PillTone.Ink) { onPlay(seriesId, startEp) }

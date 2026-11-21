@@ -1,6 +1,0 @@
-{
-  "https://media-4.example.org/catalog": "catalog.json",
-  "https://media-4.example.org/book": "detail.json",
-  "https://media-4.example.org/toc": "toc.json",
-  "https://media-4.example.org/chapter": "chapter.json"
-}

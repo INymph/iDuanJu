@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import UIKit
 
@@ -47,7 +48,7 @@ struct DramaDetailView: View {
     @State private var sourcesVerify: VerifyTarget?
     @State private var verifySheet: VerifyTarget?
     @Environment(\.zoomNS) private var ns
-    @ObservedObject private var library = LibraryStore.shared
+    private let library = LibraryStore.shared
 
 
     @State private var scrollY: CGFloat = 0
@@ -55,64 +56,16 @@ struct DramaDetailView: View {
     @State private var introOpen = false
     @State private var introClamped = false
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.layoutMetrics) private var layout
 
     private var pinned: Bool { scrollY > 236 }
     private var title: String { detail?.title ?? series.title }
 
-    private var useTwoPane: Bool { layout.tier == .expanded && detail != nil }
-
     /// ui-redesign 12 / 13: blurred poster-colour hero with a poster card, stats card, actions, tags, folding intro,
     /// 选集 before 系列 / 演员; a pinned nav once the hero scrolls away and a floating play bar once the main button does.
     var body: some View {
-        Group {
-            if useTwoPane, let d = detail {
-                HStack(alignment: .top, spacing: 28) {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            CoverView(url: cover, corner: 20, fallback: series.cover)
-                                .aspectRatio(3 / 4, contentMode: .fit)
-                                .frame(maxHeight: 420)
-                                .shadow(color: .black.opacity(0.42), radius: 18, y: 10)
-                            Text(series.source.label)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(STVTheme.accent)
-                                .padding(.horizontal, 10).padding(.vertical, 4)
-                                .background(STVTheme.accentSoft, in: Capsule())
-                            Text(title)
-                                .font(.system(size: 24, weight: .heavy))
-                                .foregroundStyle(STVTheme.text)
-                            if !d.episodes.isEmpty {
-                                Text("全 \(max(d.totalEps, d.episodes.count)) 集")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(STVTheme.secondary)
-                            }
-                            HStack(spacing: 10) {
-                                NavigationLink(value: Route.play(series, library.progress(for: series)?.episodeIndex)) {
-                                    PillButtonLabel(title: playTitle, icon: "play.fill", tone: .ink, expand: true)
-                                }
-                                .buttonStyle(PressScale(scale: 0.98))
-                                heart(48)
-                            }
-                        }
-                        .padding(.bottom, 32)
-                    }
-                    .scrollIndicators(.hidden)
-                    .frame(width: 340)
-
-                    ScrollView {
-                        detailBody(d)
-                            .padding(.bottom, 48)
-                    }
-                    .scrollIndicators(.hidden)
-                    .frame(maxWidth: .infinity)
-                }
-                .padding(.top, 64)
-                .padding(.horizontal, 28)
-                .frame(maxWidth: 1160)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
+        WithPerceptionTracking {
+            OffsetScrollView(onOffsetChange: { scrollY = $0 }) {
+                WithPerceptionTracking {
                     VStack(alignment: .leading, spacing: 0) {
                         hero
                         if let d = detail { detailBody(d) }
@@ -120,38 +73,37 @@ struct DramaDetailView: View {
                         else {
                             VStack(spacing: 10) {
                                 ShimmerBlock().frame(height: 66).clipShape(RoundedRectangle(cornerRadius: 16))
-                                ForEach(0..<3, id: \.self) { _ in ShimmerBlock().frame(height: 16) }
+                                ForEach(0..<3, id: \.self) { _ in WithPerceptionTracking {
+                                    ShimmerBlock().frame(height: 16)
+                                } }
                             }.padding(.horizontal, 20).padding(.top, 18)
                         }
                     }
-                    .frame(maxWidth: layout.detailMaxWidth)
-                    .frame(maxWidth: .infinity)
                     .padding(.bottom, 110)
                 }
-                .coordinateSpace(name: "detail")
-                .compatOnScrollY { scrollY = $0 }
-                .scrollIndicators(.hidden)
-                .compatDefaultScrollAnchor(DebugScroll.anchor)
             }
-        }
-        .accessibilityIdentifier("screen.detail")
-        .ignoresSafeArea(edges: .top)
-        .background(STVTheme.bg.ignoresSafeArea())
-        .overlay(alignment: .top) { navBar }
-        .overlay(alignment: .bottom) { if !useTwoPane { playBar } }
-        .toolbar(.hidden, for: .navigationBar)
-        .zoomDestination(series.id, ns)
-        .task {
-            if let seededDetail { detail = seededDetail; selectResumeGroup() }
-            else if detail == nil { await load() }
-        }
-        .compatOnChange(of: detail?.episodes.count) { selectResumeGroup() }
-        .task(id: detail?.seriesId) {
-            guard let d = detail else { return }
-            if series.source.isLongVideo {
-                await loadSources(d)
-            } else {
-                seasons = await SeasonStore.seasons(for: d, series: series)
+            .coordinateSpace(name: "detail")
+            .scrollIndicators(.hidden)
+            .defaultScrollAnchorCompat(DebugScroll.anchor)
+            .accessibilityIdentifier("screen.detail")
+            .ignoresSafeArea(edges: .top)
+            .background(STVTheme.bg.ignoresSafeArea())
+            .overlay(alignment: .top) { navBar }
+            .overlay(alignment: .bottom) { playBar }
+            .toolbar(.hidden, for: .navigationBar)
+            .zoomDestination(series.id, ns)
+            .task {
+                if let seededDetail { detail = seededDetail; selectResumeGroup() }
+                else if detail == nil { await load() }
+            }
+            .onChangeCompat(of: detail?.episodes.count) { _, _ in selectResumeGroup() }
+            .task(id: detail?.seriesId) {
+                guard let d = detail else { return }
+                if series.source.isLongVideo {
+                    await loadSources(d)
+                } else {
+                    seasons = await SeasonStore.seasons(for: d, series: series)
+                }
             }
         }
     }
@@ -200,7 +152,7 @@ struct DramaDetailView: View {
             Image(systemName: on ? "heart.fill" : "heart")
                 .font(.system(size: 20, weight: .medium))
                 .foregroundStyle(on ? STVTheme.accent : STVTheme.text)
-                .compatSymbolReplace()
+                .contentTransition(.opacity)
                 .frame(width: size, height: size)
                 .background(Circle().fill(STVTheme.glass))
                 .overlay(Circle().strokeBorder(STVTheme.hairline, lineWidth: 1))
@@ -271,7 +223,7 @@ struct DramaDetailView: View {
             heart(50)
         }
         .padding(.horizontal, 20).padding(.top, 16)
-        .compatOnFrame(in: .named("detail")) { f in let out = f.maxY < 60
+        .onGeometryChange(for: Bool.self) { $0.frame(in: .named("detail")).maxY < 60 } action: { out in
             withAnimation(DS.panel) { actionsOut = out }
         }
 
@@ -279,9 +231,11 @@ struct DramaDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(d.tags, id: \.self) { t in
-                        Text(t).font(.system(size: 12)).foregroundStyle(STVTheme.secondary)
-                            .padding(.horizontal, 10).frame(height: 26)
-                            .background(Capsule().fill(STVTheme.glass))
+                        WithPerceptionTracking {
+                            Text(t).font(.system(size: 12)).foregroundStyle(STVTheme.secondary)
+                                .padding(.horizontal, 10).frame(height: 26)
+                                .background(Capsule().fill(STVTheme.glass))
+                        }
                     }
                 }.padding(.horizontal, 20)
             }
@@ -312,23 +266,27 @@ struct DramaDetailView: View {
         // Preserve the spec's three-column density when upstream only supplies one/two metrics.
         // Missing metrics are absent, never fabricated; the card hugs its occupied columns.
         return GeometryReader { geo in
-          HStack(spacing: 0) {
-            ForEach(Array(cells.enumerated()), id: \.offset) { i, c in
-                VStack(spacing: 0) {
-                    HStack(spacing: 4) {
-                        if let icon = c.icon { Image(systemName: icon).font(.system(size: 13)).foregroundStyle(STVTheme.accentWarm) }
-                        Text(c.value).font(.system(size: 17, weight: .bold)).foregroundStyle(STVTheme.text).lineLimit(1).minimumScaleFactor(0.7)
+          WithPerceptionTracking {
+              HStack(spacing: 0) {
+                ForEach(Array(cells.enumerated()), id: \.offset) { i, c in
+                    WithPerceptionTracking {
+                        VStack(spacing: 0) {
+                            HStack(spacing: 4) {
+                                if let icon = c.icon { Image(systemName: icon).font(.system(size: 13)).foregroundStyle(STVTheme.accentWarm) }
+                                Text(c.value).font(.system(size: 17, weight: .bold)).foregroundStyle(STVTheme.text).lineLimit(1).minimumScaleFactor(0.7)
+                            }
+                            .frame(height: 22)
+                            Text(c.label).font(.system(size: 11)).foregroundStyle(STVTheme.secondary).lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .overlay(alignment: .leading) { if i > 0 { STVTheme.hairline.frame(width: 1) } }
                     }
-                    .frame(height: 22)
-                    Text(c.label).font(.system(size: 11)).foregroundStyle(STVTheme.secondary).lineLimit(1).minimumScaleFactor(0.8)
                 }
-                .frame(maxWidth: .infinity)
-                .overlay(alignment: .leading) { if i > 0 { STVTheme.hairline.frame(width: 1) } }
             }
-        }
-          .frame(width: geo.size.width * CGFloat(min(3, cells.count)) / 3, height: 63)
-          .dsCard(16)
-        }
+              .frame(width: geo.size.width * CGFloat(min(3, cells.count)) / 3, height: 63)
+              .dsCard(16)
+          }
+      }
         .frame(height: cells.isEmpty ? 0 : 63)
         .padding(.horizontal, 20)
         .accessibilityElement(children: .combine)
@@ -343,7 +301,7 @@ struct DramaDetailView: View {
             .background {
                 // Measure the full height once to know whether 展开 is needed.
                 Text(text).font(.system(size: 14)).lineSpacing(5).fixedSize(horizontal: false, vertical: true).hidden()
-                    .compatOnSize { introClamped = $0.height > 70 }
+                    .onGeometryChange(for: Bool.self) { $0.size.height > 70 } action: { introClamped = $0 }
             }
             .overlay(alignment: .bottomTrailing) {
                 if introClamped && !introOpen {
@@ -369,29 +327,35 @@ struct DramaDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(ranges.indices, id: \.self) { i in
-                        Button { withAnimation(DS.select) { group = i } } label: { Text(EpisodeGroups.label(ranges[i], episodes: d.episodes)) }
-                            .buttonStyle(ToneChipStyle(on: i == g, neutral: true, small: true))
-                            .accessibilityIdentifier("detail.range.\(i)")
+                        WithPerceptionTracking {
+                            Button { withAnimation(DS.select) { group = i } } label: { Text(EpisodeGroups.label(ranges[i], episodes: d.episodes)) }
+                                .buttonStyle(ToneChipStyle(on: i == g, neutral: true, small: true))
+                                .accessibilityIdentifier("detail.range.\(i)")
+                        }
                     }
                 }.padding(.horizontal, 20)
             }
             .padding(.top, 12)
         }
         if range.end >= range.start {
-            LazyVGrid(columns: layout.episodeGridItems(spacing: 8), spacing: 8) {
-                ForEach(range.start...range.end, id: \.self) { i in
-                    let on = resume?.episodeIndex == i
-                    NavigationLink(value: Route.play(series, i)) {
-                        Text("\(d.episodes[i].ep)")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(on ? STVTheme.accent : STVTheme.text)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(on ? STVTheme.accentSoft : STVTheme.glass, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay { if on { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(STVTheme.accentLine, lineWidth: 1) } }
-                            .overlay(alignment: .topTrailing) { if on { Circle().fill(STVTheme.accent).frame(width: 5, height: 5).padding(6) } }
-                            .contentShape(RoundedRectangle(cornerRadius: 12))
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+                WithPerceptionTracking {
+                    ForEach(range.start...range.end, id: \.self) { i in
+                        WithPerceptionTracking {
+                            let on = resume?.episodeIndex == i
+                            NavigationLink(value: Route.play(series, i)) {
+                                Text("\(d.episodes[i].ep)")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(on ? STVTheme.accent : STVTheme.text)
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .background(on ? STVTheme.accentSoft : STVTheme.glass, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .overlay { if on { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(STVTheme.accentLine, lineWidth: 1) } }
+                                    .overlay(alignment: .topTrailing) { if on { Circle().fill(STVTheme.accent).frame(width: 5, height: 5).padding(6) } }
+                                    .contentShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                            .buttonStyle(PressScale(scale: 0.94))
+                        }
                     }
-                    .buttonStyle(PressScale(scale: 0.94))
                 }
             }
             .padding(.horizontal, 20).padding(.top, 12)
@@ -406,19 +370,21 @@ struct DramaDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(cast) { c in
-                        let cell = VStack(spacing: 0) {
-                            Group {
-                                if c.avatar.isEmpty {
-                                    Text(String(c.name.prefix(1)))
-                                        .font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
-                                        .frame(width: 56, height: 56)
-                                        .background(LinearGradient(colors: [STVTheme.accent, STVTheme.accentWarm], startPoint: .topLeading, endPoint: .bottomTrailing), in: Circle())
-                                } else { ActorAvatar(url: c.avatar, size: 56) }
-                            }
-                            Text(c.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1).padding(.top, 6)
-                            if !c.role.isEmpty { Text(c.role).font(.system(size: 11)).foregroundStyle(STVTheme.secondary).lineLimit(1) }
-                        }.frame(width: 64)
-                        if c.id.isEmpty { cell } else { NavigationLink(value: Route.actor(c)) { cell }.buttonStyle(PressScale()) }
+                        WithPerceptionTracking {
+                            let cell = VStack(spacing: 0) {
+                                Group {
+                                    if c.avatar.isEmpty {
+                                        Text(String(c.name.prefix(1)))
+                                            .font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
+                                            .frame(width: 56, height: 56)
+                                            .background(LinearGradient(colors: [STVTheme.accent, STVTheme.accentWarm], startPoint: .topLeading, endPoint: .bottomTrailing), in: Circle())
+                                    } else { ActorAvatar(url: c.avatar, size: 56) }
+                                }
+                                Text(c.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1).padding(.top, 6)
+                                if !c.role.isEmpty { Text(c.role).font(.system(size: 11)).foregroundStyle(STVTheme.secondary).lineLimit(1) }
+                            }.frame(width: 64)
+                            if c.id.isEmpty { cell } else { NavigationLink(value: Route.actor(c)) { cell }.buttonStyle(PressScale()) }
+                        }
                     }
                 }.padding(.horizontal, 20)
             }
@@ -434,31 +400,41 @@ struct DramaDetailView: View {
                 if let t = sourcesVerify {
                     Button("去验证") { verifySheet = t }.buttonStyle(.borderedProminent).tint(STVTheme.accent)
                         .padding(.horizontal, 20)
-                        .sheet(item: $verifySheet) { t in SiteVerifySheet(target: t, onDone: retrySources) }
+                        .sheet(item: $verifySheet) { t in WithPerceptionTracking {
+                            SiteVerifySheet(target: t, onDone: retrySources)
+                        } }
                 }
             } else {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                    ForEach(0..<3, id: \.self) { _ in ShimmerBlock().frame(height: 52) }
+                    WithPerceptionTracking {
+                        ForEach(0..<3, id: \.self) { _ in WithPerceptionTracking {
+                            ShimmerBlock().frame(height: 52)
+                        } }
+                    }
                 }.padding(.horizontal, 20)
             }
         } else {
             let current = SitePrefs.preferredStream[series.id] ?? sources.first?.id
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                ForEach(sources) { s in
-                    let on = s.id == current
-                    NavigationLink(value: Route.play(series, 0)) {
-                        VStack(spacing: 3) {
-                            Text(s.quality ?? "默认").font(.subheadline.weight(.semibold)).lineLimit(1)
-                            Text(s.kind == .hls || s.kind == .hlsAES ? "HLS" : "MP4").font(.caption2)
-                                .foregroundStyle(on ? STVTheme.accent.opacity(0.8) : STVTheme.secondary)
+                WithPerceptionTracking {
+                    ForEach(sources) { s in
+                        WithPerceptionTracking {
+                            let on = s.id == current
+                            NavigationLink(value: Route.play(series, 0)) {
+                                VStack(spacing: 3) {
+                                    Text(s.quality ?? "默认").font(.subheadline.weight(.semibold)).lineLimit(1)
+                                    Text(s.kind == .hls || s.kind == .hlsAES ? "HLS" : "MP4").font(.caption2)
+                                        .foregroundStyle(on ? STVTheme.accent.opacity(0.8) : STVTheme.secondary)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 52)
+                                .background(on ? STVTheme.accentSoft : STVTheme.glass, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay { if on { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(STVTheme.accentLine, lineWidth: 1) } }
+                                .foregroundStyle(on ? STVTheme.accent : STVTheme.text)
+                            }
+                            .buttonStyle(.plain)
+                            .simultaneousGesture(TapGesture().onEnded { SitePrefs.preferredStream[series.id] = s.id })
                         }
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(on ? STVTheme.accentSoft : STVTheme.glass, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay { if on { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(STVTheme.accentLine, lineWidth: 1) } }
-                        .foregroundStyle(on ? STVTheme.accent : STVTheme.text)
                     }
-                    .buttonStyle(.plain)
-                    .simultaneousGesture(TapGesture().onEnded { SitePrefs.preferredStream[series.id] = s.id })
                 }
             }
             .padding(.horizontal, 20)
@@ -494,11 +470,13 @@ struct DramaDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(items) { s in
-                        let on = s.seriesId == currentId
-                        if on { relatedPoster(s, current: true, label: SeasonStore.label(s, in: items)) }
-                        else {
-                            NavigationLink(value: Route.series(s)) { relatedPoster(s, current: false, label: SeasonStore.label(s, in: items)) }
-                                .buttonStyle(PressScale(scale: 0.97))
+                        WithPerceptionTracking {
+                            let on = s.seriesId == currentId
+                            if on { relatedPoster(s, current: true, label: SeasonStore.label(s, in: items)) }
+                            else {
+                                NavigationLink(value: Route.series(s)) { relatedPoster(s, current: false, label: SeasonStore.label(s, in: items)) }
+                                    .buttonStyle(PressScale(scale: 0.97))
+                            }
                         }
                     }
                 }
@@ -567,29 +545,31 @@ struct DetailRelatedShotHost: View {
     @State private var seed: HGSeriesDetail?
     @State private var loading = true
     var body: some View {
-        NavigationStack {
-            Group {
-                if let seed {
-                    DramaDetailView(series: series, seededDetail: seed)
-                        .id(seed.seriesId + "-\(seed.relatedSeries.count)")
-                } else if loading {
-                    ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    DramaDetailView(series: series, seededDetail: .previewDetail)
+        WithPerceptionTracking {
+            NavigationStack {
+                Group {
+                    if let seed {
+                        DramaDetailView(series: series, seededDetail: seed)
+                            .id(seed.seriesId + "-\(seed.relatedSeries.count)")
+                    } else if loading {
+                        ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        DramaDetailView(series: series, seededDetail: .previewDetail)
+                    }
                 }
             }
-        }
-        .preferredColorScheme(.dark)
-        .background(STVTheme.bg)
-        .task {
-            let live = ProcessInfo.processInfo.environment["STV_LIVE_SERIES"] ?? ""
-            if HongguoClient.looksSID(live), let d = try? await HongguoClient.shared.detail(seriesId: live) {
-                series = HGSeries(seriesId: d.seriesId, title: d.title, cover: d.cover, episodeCount: max(d.totalEps, d.episodes.count))
-                seed = d
-            } else {
-                seed = .previewDetail
+            .preferredColorScheme(.dark)
+            .background(STVTheme.bg)
+            .task {
+                let live = ProcessInfo.processInfo.environment["STV_LIVE_SERIES"] ?? ""
+                if HongguoClient.looksSID(live), let d = try? await HongguoClient.shared.detail(seriesId: live) {
+                    series = HGSeries(seriesId: d.seriesId, title: d.title, cover: d.cover, episodeCount: max(d.totalEps, d.episodes.count))
+                    seed = d
+                } else {
+                    seed = .previewDetail
+                }
+                loading = false
             }
-            loading = false
         }
     }
 }
@@ -603,8 +583,10 @@ struct ResolveProbeHost: View {
         return e.isEmpty ? "7683440834066271256" : e
     }
     var body: some View {
-        ScrollView { Text(lines.joined(separator: "\n")).font(.system(.footnote, design: .monospaced)).padding() }
-            .task { await run() }
+        WithPerceptionTracking {
+            ScrollView { Text(lines.joined(separator: "\n")).font(.system(.footnote, design: .monospaced)).padding() }
+                .task { await run() }
+        }
     }
     private func run() async {
         var out: [String] = []
@@ -629,12 +611,14 @@ struct ResolveProbeHost: View {
 struct RelatedProbeHost: View {
     @State private var text = "probing…"
     var body: some View {
-        ScrollView {
-            Text(text).font(.system(.caption, design: .monospaced)).foregroundStyle(.white)
-                .frame(maxWidth: .infinity, alignment: .leading).padding()
+        WithPerceptionTracking {
+            ScrollView {
+                Text(text).font(.system(.caption, design: .monospaced)).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding()
+            }
+            .background(Color.black)
+            .task { await run() }
         }
-        .background(Color.black)
-        .task { await run() }
     }
     private func run() async {
         let sid = "7661844828728085528" // 被贬北凉… S1 from gateway tests
@@ -667,12 +651,14 @@ struct RelatedProbeHost: View {
 struct SocialStats: View {
     let detail: HGSeriesDetail
     var body: some View {
-        HStack(spacing: 8) {
-            if detail.rating > 0 {
-                pill(Image(systemName: "star.fill"), String(format: "%.1f", detail.rating) + " 观众评分" +
-                     (detail.ratingCount.isEmpty ? "" : " · \(detail.ratingCount)人"), STVTheme.accentWarm)
+        WithPerceptionTracking {
+            HStack(spacing: 8) {
+                if detail.rating > 0 {
+                    pill(Image(systemName: "star.fill"), String(format: "%.1f", detail.rating) + " 观众评分" +
+                         (detail.ratingCount.isEmpty ? "" : " · \(detail.ratingCount)人"), STVTheme.accentWarm)
+                }
+                if !detail.hotText.isEmpty { pill(Image(systemName: "flame.fill"), "全网热度 " + detail.hotText, STVTheme.accent) }
             }
-            if !detail.hotText.isEmpty { pill(Image(systemName: "flame.fill"), "全网热度 " + detail.hotText, STVTheme.accent) }
         }
     }
     private func pill(_ icon: Image, _ text: String, _ tint: Color) -> some View {

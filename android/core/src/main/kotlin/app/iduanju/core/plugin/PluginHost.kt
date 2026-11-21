@@ -72,7 +72,6 @@ class PluginHost(
     fun check(u: String): HttpUrl {
         val url = u.toHttpUrlOrNull() ?: throw perm("地址无效")
         if (url.scheme != "https" && url.scheme != "http") throw perm("只允许 http/https：${u.take(80)}")
-        if(url.username.isNotEmpty()||url.password.isNotEmpty())throw perm("网址不可携带凭证")
         val host = url.host.lowercase()
         if (NetGuard.isIPLiteral(host)) throw perm("不允许直接访问 IP：$host")
         if (url.port != 443 && url.port != 80) throw perm("不允许非标准端口：$host:${url.port}")

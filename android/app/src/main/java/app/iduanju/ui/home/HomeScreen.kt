@@ -16,8 +16,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -131,7 +129,7 @@ fun formatCount(n: Long) = HomeFmt.count(n)
 fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay: (String) -> Unit = {}, onOpenManga: (String) -> Unit = {}, onImmersiveChanged: (Boolean) -> Unit = {}) {
     val c = IdjThemeColors
     // iOS HomeSource.all: [红果, 黄果, AI剧] + visible sites (采集站 / plugins) + [频道, 漫画]
-    val sites = IdjApp.instance.cms.visibleSites.filterNot { it.origin.equals("TVBox", ignoreCase = true) || it.origin.startsWith("TVBox") }
+    val sites = IdjApp.instance.cms.visibleSites
     val plugins = IdjApp.instance.plugins.visible(IdjApp.instance.cms.adultUnlocked).filter { it.type == "video" || it.type == "shortdrama" }
     val pages: List<Any> = listOf<Any>(HomeSource.hongguo) + (if (IdjApp.instance.cms.adultUnlocked) listOf<Any>(HomeSource.huangguo) else emptyList()) + listOf<Any>(HomeSource.ai) + sites + plugins + listOf(HomeSource.channels, HomeSource.manga, HomeSource.novel)
     val labels = pages.map { when (it) { is HomeSource -> it.label; is app.iduanju.core.cms.CMSSite -> it.name; else -> (it as app.iduanju.plugin.PluginStore.Installed).name } }
@@ -141,57 +139,66 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
         if (i >= 0) { pager.scrollToPage(i); HomeJump.label = null }
     }
     val scope = rememberCoroutineScope()
-    var feedScroll by remember { mutableFloatStateOf(0f) }
-    val feedScrollConnection = remember {
-        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
-            override fun onPostScroll(consumed: Offset, available: Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): Offset {
-                feedScroll = (feedScroll - consumed.y).coerceAtLeast(0f)
-                return Offset.Zero
-            }
-        }
-    }
+    val heroCovers = remember { mutableStateMapOf<String, String>() }
     val source = pages[pager.currentPage.coerceIn(0, pages.size - 1)]
+    val sourceKey = labels[pager.currentPage.coerceIn(0, pages.size - 1)]
     var novelFullScreen by remember { mutableStateOf(false) }
     val immersive = source == HomeSource.novel && novelFullScreen
     LaunchedEffect(immersive) { onImmersiveChanged(immersive) }
     DisposableEffect(Unit) { onDispose { onImmersiveChanged(false) } }
-    LaunchedEffect(pager.currentPage) { feedScroll = 0f }
-    val pinned = with(androidx.compose.ui.platform.LocalDensity.current) { feedScroll > 8.dp.toPx() }
+    val onPoster = heroCovers[sourceKey] != null
+    val ink = if (onPoster) Color.White else c.text
 
     Box(Modifier.fillMaxSize().background(c.bg)) {
-        AmbientGlow(visible = !pinned)
-        Column(Modifier.fillMaxSize().then(if (immersive) Modifier else Modifier.statusBarsPadding())) {
+        // atmosphere: hero poster blurred across the top, fading into the page colour
+        Box(
+            Modifier.fillMaxWidth().height(420.dp)
+                .graphicsLayer { alpha = 0.99f }
+                .drawWithContent {
+                drawContent()
+                drawRect(Brush.verticalGradient(0f to Color.Transparent, 0.6f to Color.Transparent, 1f to c.bg))
+            },
+        ) {
+            if (onPoster) {
+                Box(Modifier.fillMaxSize().background(Color(0xFF141A26)))
+                BlurBackdrop(heroCovers[sourceKey], Modifier.fillMaxSize(), 48.dp, 0.75f)
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, c.bg.copy(0.35f), c.bg))))
+            } else {
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(c.elevated, c.bg))))
+            }
+        }
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
             // header: search + filter capsule
-            if (!immersive) Column(Modifier.dsPinned(pinned).padding(top = 6.dp)) {
+            if (!immersive) Column(Modifier.padding(top = 6.dp)) {
                 Row(
                     Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(46.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(c.glass)
-                        .border(1.dp, c.glassBorder, RoundedCornerShape(50)),
+                        .background(if (onPoster) Color.White.copy(0.16f) else c.glass)
+                        .border(1.dp, if (onPoster) Color.White.copy(0.18f) else c.glassBorder, RoundedCornerShape(50)),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(Modifier.weight(1f).fillMaxHeight().clickable(onClick = onSearch).padding(start = 16.dp).semantics { contentDescription = "home.search" },
                         verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Search, null, tint = c.secondary, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.Search, null, tint = if (onPoster) ink.copy(0.85f) else c.secondary, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(10.dp))
-                        Text("搜索你想看的作品", color = c.secondary, fontSize = 16.sp, maxLines = 1)
+                        Text("搜索你想看的作品", color = if (onPoster) ink.copy(0.8f) else c.secondary, fontSize = 16.sp, maxLines = 1)
                     }
                     Row(Modifier.fillMaxHeight().clickable { HomeChannelSheetOpen.value = true }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.FilterList, null, tint = c.text, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.FilterList, null, tint = ink, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(5.dp))
-                        Text("筛选", color = c.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text("筛选", color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 Spacer(Modifier.height(12.dp))
                 var sheet by HomeChannelSheetOpen
-                ChannelBar(labels, pager.currentPage, c.text, onMore = { sheet = true }) { scope.launch { pager.animateScrollToPage(it) } }
+                ChannelBar(labels, pager.currentPage, ink, onMore = { sheet = true }) { scope.launch { pager.animateScrollToPage(it) } }
                 if (sheet) ChannelSheet(pages, labels, pager.currentPage, onDismiss = { sheet = false }) { page, sub ->
                     sheet = false
                     if (sub != null) HomeSubSel.map[labels[page]] = sub
                     scope.launch { pager.animateScrollToPage(page) }
                 }
             }
-            HorizontalPager(pager, Modifier.fillMaxSize().nestedScroll(feedScrollConnection), userScrollEnabled = !immersive, beyondViewportPageCount = 0) { page ->
+            HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !immersive, beyondViewportPageCount = 0) { page ->
                 val any = pages[page]
                 if (any is app.iduanju.core.cms.CMSSite) { SiteFeedPage(any, onOpenDetail); return@HorizontalPager }
                 if (any is app.iduanju.plugin.PluginStore.Installed) { PluginFeedPage(any, onOpenDetail); return@HorizontalPager }
@@ -217,7 +224,7 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
                         }
                         Box(Modifier.weight(1f)) {
                             if (sel == 1) app.iduanju.huangguo.HuangguoFeedPage(onOpenDetail, aiOnly = true)
-                            else FeedPage(s, onOpenDetail)
+                            else FeedPage(s, onOpenDetail) { cover -> if (cover == null) heroCovers.remove(s.label) else heroCovers[s.label] = cover }
                         }
                     }
                 } else if (s.subs().isEmpty()) {
@@ -225,7 +232,7 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
                         Text("「${s.label}」Android 版尚未移植", color = c.secondary, fontSize = 14.sp)
                     }
                 } else {
-                    FeedPage(s, onOpenDetail)
+                    FeedPage(s, onOpenDetail) { cover -> if (cover == null) heroCovers.remove(s.label) else heroCovers[s.label] = cover }
                 }
             }
         }
@@ -336,7 +343,8 @@ private fun ChannelBar(items: List<String>, selected: Int, ink: Color, onMore: (
 
 
 @Composable
-private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit) {
+private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit, onHero: (String?) -> Unit) {
+    val c = IdjThemeColors
     val subs = source.subs()
     var tab by remember { mutableStateOf(subs.getOrElse(HomeSubSel.map[source.label] ?: 0) { subs.first() }) }
     LaunchedEffect(HomeSubSel.map[source.label]) { HomeSubSel.map[source.label]?.let { i -> subs.getOrNull(i)?.let { tab = it } } }
@@ -344,19 +352,17 @@ private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit) {
     val heroPicks = boards.firstOrNull()?.let { BoardCache.items[it.id] }?.take(5) ?: emptyList()
     var heroIndex by remember(tab) { mutableIntStateOf(0) }
     LaunchedEffect(tab) { boards.firstOrNull()?.let { BoardCache.load(it) } }
+    LaunchedEffect(heroPicks, heroIndex) { onHero(heroPicks.getOrNull(heroIndex)?.cover) }
 
-    @Composable fun subTabs(modifier: Modifier = Modifier) {
-        SegmentedTabs(subs, tab, { it.subLabel }, {
-            tab = it
-            HomeSubSel.map[source.label] = subs.indexOf(it)
-        }, modifier)
-    }
-    if (tab == HomeTab.ActorRank) {
-        app.iduanju.ui.profile.ActorRankList(bottomPadding = 96.dp) { subTabs() }
-        return
-    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp + 72.dp)) {
-        if (subs.size > 1) subTabs(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp))
+        if (subs.size > 1) {
+            SegmentedTabs(subs, tab, { it.subLabel }, { tab = it; HomeSubSel.map[source.label] = subs.indexOf(it) }, Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp))
+        }
+        if (tab == HomeTab.ActorRank) {
+            val go = app.iduanju.ui.LocalNavigate.current
+            Box(Modifier.fillMaxWidth().padding(40.dp).clickable { go("actorRank") }, contentAlignment = Alignment.Center) { Text("查看剧星榜 →", color = c.accent) }
+            return@Column
+        }
         Column(Modifier.padding(top = 0.dp), verticalArrangement = Arrangement.spacedBy(26.dp)) {
             if (heroPicks.isNotEmpty()) {
                 PosterHero(boards.first().title, heroPicks, heroIndex, { heroIndex = it }, onOpen)
@@ -388,10 +394,8 @@ private fun HeroSkeleton() {
 private fun PosterHero(board: String, picks: List<HGSeries>, index: Int, setIndex: (Int) -> Unit, onOpen: (String) -> Unit) {
     val pager = rememberPagerState { picks.size }
     LaunchedEffect(pager.currentPage) { setIndex(pager.currentPage) }
-    // Keyed on settledPage: currentPage flips halfway through the animation, which would restart this
-    // effect and cancel the scroll, leaving the hero stuck between two pages.
-    LaunchedEffect(pager.settledPage, picks.size) {
-        if (picks.size > 1) { delay(6000); if (!pager.isScrollInProgress) pager.animateScrollToPage((pager.settledPage + 1) % picks.size) }
+    LaunchedEffect(pager.currentPage, picks.size) {
+        if (picks.size > 1) { delay(6000); pager.animateScrollToPage((pager.currentPage + 1) % picks.size) }
     }
     val cur = picks.getOrNull(index)
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -402,11 +406,8 @@ private fun PosterHero(board: String, picks: List<HGSeries>, index: Int, setInde
         platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false))
     val metaStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, lineHeight = 18.sp,
         platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false))
-    // Material Text merges the ambient style (including letter spacing). Measure
-    // that same resolved style, not a partial style that underestimates the label.
-    val buttonStyle = LocalTextStyle.current.merge(androidx.compose.ui.text.TextStyle(
-        fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold,
-        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)))
+    val buttonStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold,
+        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false))
     BoxWithConstraints(Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
         // Preserve the spec's 112 dp poster normally; narrow windows keep a usable info column.
         val posterWidth = minOf(112.dp, (maxWidth - 28.dp - 14.dp - 160.dp).coerceAtLeast(80.dp))
@@ -416,14 +417,7 @@ private fun PosterHero(board: String, picks: List<HGSeries>, index: Int, setInde
             measurer.measure(text, style, maxLines = lines, overflow = TextOverflow.Ellipsis,
                 constraints = androidx.compose.ui.unit.Constraints(maxWidth = infoPx)).size.height.toDp()
         }
-        val ctaLabel = "查看详情"
-        val pillPadding = 14.dp
-        val iconSize = 14.dp
-        val iconGap = 6.dp
-        val ctaWidth = with(density) {
-            val labelWidth = measurer.measure(ctaLabel, buttonStyle, maxLines = 1, softWrap = false).size.width
-            (labelWidth + 2 * pillPadding.roundToPx() + iconSize.roundToPx() + iconGap.roundToPx()).toDp()
-        }
+        val ctaWidth = with(density) { measurer.measure("查看详情", buttonStyle).size.width.toDp() } + 48.dp
         val visualButtonHeight = with(density) { 16.sp.toDp() + 12.dp }.coerceAtLeast(32.dp)
         val touchHeight = maxOf(48.dp, visualButtonHeight)
         val dotsWidth = if (picks.size > 1) (14 + (picks.size - 1) * 9).dp else 0.dp
@@ -464,11 +458,11 @@ private fun PosterHero(board: String, picks: List<HGSeries>, index: Int, setInde
                         @Composable fun cta() {
                             // Explicit 48 dp hit slot; the spec's 32 dp white pill stays visually compact.
                             Box(Modifier.height(touchHeight).width(ctaWidth).testTag("home.hero.cta.$i")
-                                .pressClick(0.98f, label = ctaLabel) { onOpen(s.seriesId) }, contentAlignment = Alignment.Center) {
-                                Row(Modifier.fillMaxWidth().height(visualButtonHeight).testTag("home.hero.pill.$i").clip(CircleShape).background(Color.White).padding(horizontal = pillPadding),
-                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(iconGap)) {
-                                    Icon(Icons.Filled.PlayArrow, null, Modifier.size(iconSize), tint = Color(0xFF111317))
-                                    Text(ctaLabel, Modifier.weight(1f).testTag("home.hero.ctaText.$i"), color = Color(0xFF111317), style = buttonStyle, maxLines = 1, softWrap = false)
+                                .pressClick(0.98f, label = "查看详情") { onOpen(s.seriesId) }, contentAlignment = Alignment.Center) {
+                                Row(Modifier.fillMaxWidth().height(visualButtonHeight).testTag("home.hero.pill.$i").clip(CircleShape).background(Color.White).padding(horizontal = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)) {
+                                    Icon(Icons.Filled.PlayArrow, null, Modifier.size(14.dp), tint = Color(0xFF111317))
+                                    Text("查看详情", Modifier.testTag("home.hero.ctaText.$i"), color = Color(0xFF111317), style = buttonStyle, maxLines = 1)
                                 }
                             }
                         }

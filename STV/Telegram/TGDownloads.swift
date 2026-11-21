@@ -1,5 +1,5 @@
 import Foundation
-import Combine
+import Perception
 import Photos
 
 struct TGDownload: Codable, Identifiable, Hashable {
@@ -25,8 +25,8 @@ struct TGDownload: Codable, Identifiable, Hashable {
 
 /// In-app download manager: FIFO queue (2 at a time), progress, pause/resume (resume data), delete,
 /// offline playback, and 保存到相册.
-@MainActor
-final class TGDownloads: NSObject, ObservableObject {
+@MainActor @Perceptible
+final class TGDownloads: NSObject {
     static let shared = TGDownloads()
     static let maxConcurrent = 2
     nonisolated static var dir: URL {
@@ -35,10 +35,10 @@ final class TGDownloads: NSObject, ObservableObject {
         return u
     }
 
-    @Published private(set) var items: [TGDownload] = []
+    private(set) var items: [TGDownload] = []
     private var tasks: [String: URLSessionDownloadTask] = [:]
     private var resumeData: [String: Data] = [:]
-    private lazy var session: URLSession = {
+    @PerceptionIgnored private lazy var session: URLSession = {
         let c = URLSessionConfiguration.default
         c.timeoutIntervalForRequest = 30
         return URLSession(configuration: c, delegate: Bridge(owner: self), delegateQueue: .main)

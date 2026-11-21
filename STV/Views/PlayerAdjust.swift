@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import UIKit
 import MediaPlayer
@@ -8,9 +9,9 @@ import AVFoundation
 /// always excluding the edge-back strip. Brightness is restored when the player goes away.
 enum AdjustSide { case brightness, volume }
 
-@MainActor
-final class PlayerAdjuster: ObservableObject {
-    @Published var hud: (side: AdjustSide, value: Double)?
+@MainActor @Perceptible
+final class PlayerAdjuster {
+    var hud: (side: AdjustSide, value: Double)?
     private var originalBrightness: CGFloat?
     private var startValue: Double = 0
     private var hideTask: Task<Void, Never>?
@@ -86,18 +87,20 @@ struct PlayerAdjustHUD: View {
         }
     }
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon).font(.system(size: 15, weight: .semibold)).frame(width: 20)
-            ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.25))
-                Capsule().fill(.white).frame(width: 120 * value)
-            }.frame(width: 120, height: 4)
-            Text("\(Int((value * 100).rounded()))").font(.caption.monospacedDigit().weight(.semibold)).frame(width: 28, alignment: .trailing)
+        WithPerceptionTracking {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 15, weight: .semibold)).frame(width: 20)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.25))
+                    Capsule().fill(.white).frame(width: 120 * value)
+                }.frame(width: 120, height: 4)
+                Text("\(Int((value * 100).rounded()))").font(.caption.monospacedDigit().weight(.semibold)).frame(width: 28, alignment: .trailing)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .background(.black.opacity(0.62), in: Capsule())
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(side == .brightness ? "亮度 \(Int(value * 100))%" : "音量 \(Int(value * 100))%")
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(.black.opacity(0.62), in: Capsule())
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(side == .brightness ? "亮度 \(Int(value * 100))%" : "音量 \(Int(value * 100))%")
     }
 }

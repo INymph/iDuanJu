@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import UIKit
 
@@ -83,9 +84,6 @@ enum Route: Hashable {
     case mangaLibrary
     case tdChat(Int64, String)
     case plugins
-    case tvboxConfig
-    case tvboxVod(String, String, String, String, Int)
-    case tvboxLive(String, String, Int)
 }
 
 struct ZoomNamespaceKey: EnvironmentKey { static let defaultValue: Namespace.ID? = nil }
@@ -103,34 +101,31 @@ extension View {
     }
     func routes() -> some View {
         navigationDestination(for: Route.self) { r in
-            switch r {
-            case .series(let s): DramaDetailView(series: s)
-            case .board(let b): BoardListView(board: b)
-            case .play(let s, let i): VerticalPlayerView(series: s, startIndex: i)
-            case .actor(let a): ActorView(actor: a)
-            case .search: SearchView(pushed: true)
-            case .searchFor(let q): SearchView(pushed: true, initialQuery: q)
-            case .actorRank: ActorRankView()
-            case .favorites: LibraryListView(kind: .favorites)
-            case .history: LibraryListView(kind: .history)
-            case .sources: SourcesView()
-            case .licenses: LicensesView()
-            case .channels: ChannelFeedView()
-            case .tgManage: TGManageView()
-            case .tgRules: TGRulesView()
-            case .tgSearch(let c): TGSearchView(channel: c)
-            case .downloads: DownloadsView()
-            case .tdlib: TDLibSettingsView()
-            case .mangaHome: MangaHomeView()
-            case .manga(let m): MangaDetailView(item: m)
-            case .mangaLibrary: MangaLibraryView()
-            case .tdChat(let id, let t): TDChatView(chatId: id, title: t)
-            case .plugins: PluginsView()
-            case .tvboxConfig: TVBoxConfigView()
-            case .tvboxVod(let siteKey, let sid, let title, let cover, let ep):
-                TVBoxVodPlayerView(siteKey: siteKey, seriesId: sid, initialTitle: title, initialCover: cover, startEp: ep)
-            case .tvboxLive(let repoId, let liveId, let chIdx):
-                TVBoxLivePlayerView(repoId: repoId, liveId: liveId, startChannelIndex: chIdx)
+            WithPerceptionTracking {
+                switch r {
+                case .series(let s): DramaDetailView(series: s)
+                case .board(let b): BoardListView(board: b)
+                case .play(let s, let i): VerticalPlayerView(series: s, startIndex: i)
+                case .actor(let a): ActorView(actor: a)
+                case .search: SearchView(pushed: true)
+                case .searchFor(let q): SearchView(pushed: true, initialQuery: q)
+                case .actorRank: ActorRankView()
+                case .favorites: LibraryListView(kind: .favorites)
+                case .history: LibraryListView(kind: .history)
+                case .sources: SourcesView()
+                case .licenses: LicensesView()
+                case .channels: ChannelFeedView()
+                case .tgManage: TGManageView()
+                case .tgRules: TGRulesView()
+                case .tgSearch(let c): TGSearchView(channel: c)
+                case .downloads: DownloadsView()
+                case .tdlib: TDLibSettingsView()
+                case .mangaHome: MangaHomeView()
+                case .manga(let m): MangaDetailView(item: m)
+                case .mangaLibrary: MangaLibraryView()
+                case .tdChat(let id, let t): TDChatView(chatId: id, title: t)
+                case .plugins: PluginsView()
+                }
             }
         }
     }
@@ -226,19 +221,13 @@ struct ErrorStateView: View {
         return t.source == .huangguo ? "需要验证" : "需要站点验证（自动验证未通过）"
     }
     var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: error.verifyTarget == nil ? "wifi.exclamationmark" : "shield.lefthalf.filled")
-                .font(.system(size: 38, weight: .light))
-                .foregroundStyle(STVTheme.secondary)
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(STVTheme.text)
-            Text(error.localizedDescription)
-                .font(.subheadline)
-                .foregroundStyle(STVTheme.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
-            HStack(spacing: 12) {
+        WithPerceptionTracking {
+            UnavailableStateView {
+                Label(title,
+                      systemImage: error.verifyTarget == nil ? "wifi.exclamationmark" : "shield.lefthalf.filled")
+            } description: {
+                Text(error.localizedDescription)
+            } actions: {
                 if let t = error.verifyTarget {
                     Button("去验证") { verify = t }.buttonStyle(.borderedProminent).tint(STVTheme.accent)
                     Button("重试") { CFSolver.shared.resetCooldown(); retry() }.tint(STVTheme.secondary)
@@ -246,16 +235,15 @@ struct ErrorStateView: View {
                     Button("重试") { CFSolver.shared.resetCooldown(); retry() }.buttonStyle(.borderedProminent).tint(STVTheme.accent)
                 }
             }
-            .padding(.top, 4)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 36)
-        .sheet(item: $verify) { t in SiteVerifySheet(target: t, onDone: retry) }
-        .task {
-            #if DEBUG
-            // Screenshot hook: STV_AUTO_VERIFY=1 opens the verify sheet straight away.
-            if ProcessInfo.processInfo.environment["STV_AUTO_VERIFY"] == "1", let t = error.verifyTarget { verify = t }
-            #endif
+            .sheet(item: $verify) { t in WithPerceptionTracking {
+                SiteVerifySheet(target: t, onDone: retry)
+            } }
+            .task {
+                #if DEBUG
+                // Screenshot hook: STV_AUTO_VERIFY=1 opens the verify sheet straight away.
+                if ProcessInfo.processInfo.environment["STV_AUTO_VERIFY"] == "1", let t = error.verifyTarget { verify = t }
+                #endif
+            }
         }
     }
 }

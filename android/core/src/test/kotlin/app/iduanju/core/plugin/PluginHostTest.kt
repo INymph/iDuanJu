@@ -17,13 +17,6 @@ class PluginHostTest {
         return PluginHost(m, Files.createTempDirectory("plg").toFile(), secrets = { if (it == "token") "S3CRET" else null })
     }
 
-    @Test fun credentialURLsAndHeaderInjectionAreRejected() {
-        val h=host();h.fixture={_,_->Triple(200,emptyMap(),ByteArray(0))}
-        assertFalse(h.allowed("https://u:p@www.example.com/"))
-        val headers=PluginOut.headers(JSONObject().put("Referer","safe\r\nInjected: yes").put("User-Agent","safe").put("Authorization","blocked"))
-        assertFalse(headers.containsKey("Referer"));assertFalse(headers.containsKey("Authorization"));assertEquals("safe",headers["User-Agent"])
-    }
-
     @Test fun manifestAndBundle() {
         val m = PluginManifest.decode(manifestJSON)
         assertEquals(emptyList<String>(), m.problems())

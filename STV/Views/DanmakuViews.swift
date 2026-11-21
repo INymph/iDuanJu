@@ -1,9 +1,10 @@
+import Perception
 import SwiftUI
 import AVFoundation
 
 /// Persisted danmaku preferences (hongguo-open-player: enabled / rows / speed / opacity / likes priority) + merge toggle.
-@MainActor
-final class DanmakuSettings: ObservableObject {
+@MainActor @Perceptible
+final class DanmakuSettings {
     static let shared = DanmakuSettings()
     enum Speed: String, CaseIterable, Identifiable {
         case slow, medium, fast
@@ -27,16 +28,16 @@ final class DanmakuSettings: ObservableObject {
         var fraction: CGFloat { switch self { case .quarter: 0.25; case .third: 0.34; case .half: 0.5; case .most: 0.75 } }
     }
 
-    @Published var enabled: Bool { didSet { save() } }
-    @Published var area: Area { didSet { save() } }
-    @Published var merge: Bool { didSet { save() } }
-    @Published var likesPriority: Bool { didSet { save() } }
-    @Published var rows: Int { didSet { save() } }
-    @Published var opacity: Double { didSet { save() } }
-    @Published var speed: Speed { didSet { save() } }
-    @Published var size: Size { didSet { save() } }
+    var enabled: Bool { didSet { save() } }
+    var area: Area { didSet { save() } }
+    var merge: Bool { didSet { save() } }
+    var likesPriority: Bool { didSet { save() } }
+    var rows: Int { didSet { save() } }
+    var opacity: Double { didSet { save() } }
+    var speed: Speed { didSet { save() } }
+    var size: Size { didSet { save() } }
     /// Live status of the current episode (not persisted).
-    @Published var status = ""
+    var status = ""
 
     private let d = UserDefaults.standard
     private init() {
@@ -174,22 +175,27 @@ struct DanmakuOverlay: View {
     private var settings: DanmakuSettings { .shared }
 
     var body: some View {
-        GeometryReader { geo in
-            let size = geo.size
-            TimelineView(.animation(minimumInterval: 1.0 / 60, paused: co.paused || placed.isEmpty)) { timeline in
-                // Reading timeline.date inside the renderer forces a redraw every animation frame.
-                let frame = timeline.date
-                Canvas { ctx, canvas in
-                    _ = frame
-                    draw(&ctx, canvas)
+        WithPerceptionTracking {
+            GeometryReader { geo in
+                WithPerceptionTracking {
+                    let size = geo.size
+                    TimelineView(.animation(minimumInterval: 1.0 / 60, paused: co.paused || placed.isEmpty)) { timeline in
+                        // Reading timeline.date inside the renderer forces a redraw every animation frame.
+                        WithPerceptionTracking {
+                            let frame = timeline.date
+                            Canvas { ctx, canvas in
+                                _ = frame
+                                draw(&ctx, canvas)
+                            }
+                        }
+                    }
+                    .onChangeCompat(of: layoutKey(size), initial: true) { _, k in relayout(size, k) }
                 }
             }
-            .onAppear { relayout(size, layoutKey(size)) }
-            .compatOnChange(of: layoutKey(size)) { k in relayout(size, k) }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .task(id: vid) { await load() }
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .task(id: vid) { await load() }
     }
 
     private var font: CGFloat { settings.size.points }
@@ -266,65 +272,73 @@ extension Color {
 }
 
 struct DanmakuSettingsSheet: View {
-    @ObservedObject var settings = DanmakuSettings.shared
+    @Perception.Bindable var settings = DanmakuSettings.shared
     var available = true
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("弹幕").font(.title3.bold())
-                if !available {
-                    Text("当前片源不支持弹幕（仅红果）").font(.footnote).foregroundStyle(STVTheme.secondary)
-                }
-                Toggle("显示弹幕", isOn: $settings.enabled)
-                Toggle(isOn: $settings.merge) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("合并重复弹幕")
-                        Text("相近时间内相同/相似的弹幕合成一条，显示 ×次数").font(.caption).foregroundStyle(STVTheme.secondary)
+        WithPerceptionTracking {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("弹幕").font(.title3.bold())
+                    if !available {
+                        Text("当前片源不支持弹幕（仅红果）").font(.footnote).foregroundStyle(STVTheme.secondary)
+                    }
+                    Toggle("显示弹幕", isOn: $settings.enabled.withSwitchFeedback())
+                    Toggle(isOn: $settings.merge.withSwitchFeedback()) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("合并重复弹幕")
+                            Text("相近时间内相同/相似的弹幕合成一条，显示 ×次数").font(.caption).foregroundStyle(STVTheme.secondary)
+                        }
+                    }
+                    Toggle(isOn: $settings.likesPriority.withSwitchFeedback()) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("高赞优先")
+                            Text("轨道拥挤时优先显示点赞多的弹幕").font(.caption).foregroundStyle(STVTheme.secondary)
+                        }
+                    }
+                    Stepper("显示行数：\(settings.rows)", value: $settings.rows, in: 1...8)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("显示区域")
+                            Text("从屏幕顶部（顶栏下方）算起，不会遮挡底部控件").font(.caption).foregroundStyle(STVTheme.secondary)
+                        }
+                        Spacer()
+                        Picker("显示区域", selection: $settings.area.withSelectionFeedback()) {
+                            ForEach(DanmakuSettings.Area.allCases) { _stv0 in WithPerceptionTracking {
+                                Text(_stv0.label).tag(_stv0)
+                            } }
+                        }.pickerStyle(.segmented).frame(width: 200)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("不透明度：\(Int(settings.opacity * 100))%")
+                        Slider(value: $settings.opacity, in: 0.2...1).tint(STVTheme.accent)
+                    }
+                    HStack {
+                        Text("滚动速度")
+                        Spacer()
+                        Picker("滚动速度", selection: $settings.speed.withSelectionFeedback()) {
+                            ForEach(DanmakuSettings.Speed.allCases) { _stv0 in WithPerceptionTracking {
+                                Text(_stv0.label).tag(_stv0)
+                            } }
+                        }.pickerStyle(.segmented).frame(width: 180)
+                    }
+                    HStack {
+                        Text("字号")
+                        Spacer()
+                        Picker("字号", selection: $settings.size.withSelectionFeedback()) {
+                            ForEach(DanmakuSettings.Size.allCases) { _stv0 in WithPerceptionTracking {
+                                Text(_stv0.label).tag(_stv0)
+                            } }
+                        }.pickerStyle(.segmented).frame(width: 180)
+                    }
+                    if !settings.status.isEmpty {
+                        Text(settings.status).font(.caption).foregroundStyle(STVTheme.secondary)
                     }
                 }
-                Toggle(isOn: $settings.likesPriority) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("高赞优先")
-                        Text("轨道拥挤时优先显示点赞多的弹幕").font(.caption).foregroundStyle(STVTheme.secondary)
-                    }
-                }
-                Stepper("显示行数：\(settings.rows)", value: $settings.rows, in: 1...8)
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("显示区域")
-                        Text("从屏幕顶部（顶栏下方）算起，不会遮挡底部控件").font(.caption).foregroundStyle(STVTheme.secondary)
-                    }
-                    Spacer()
-                    Picker("显示区域", selection: $settings.area) {
-                        ForEach(DanmakuSettings.Area.allCases) { Text($0.label).tag($0) }
-                    }.pickerStyle(.segmented).frame(width: 200)
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("不透明度：\(Int(settings.opacity * 100))%")
-                    Slider(value: $settings.opacity, in: 0.2...1).tint(STVTheme.accent)
-                }
-                HStack {
-                    Text("滚动速度")
-                    Spacer()
-                    Picker("滚动速度", selection: $settings.speed) {
-                        ForEach(DanmakuSettings.Speed.allCases) { Text($0.label).tag($0) }
-                    }.pickerStyle(.segmented).frame(width: 180)
-                }
-                HStack {
-                    Text("字号")
-                    Spacer()
-                    Picker("字号", selection: $settings.size) {
-                        ForEach(DanmakuSettings.Size.allCases) { Text($0.label).tag($0) }
-                    }.pickerStyle(.segmented).frame(width: 180)
-                }
-                if !settings.status.isEmpty {
-                    Text(settings.status).font(.caption).foregroundStyle(STVTheme.secondary)
-                }
+                .tint(STVTheme.accent)
+                .padding(20).padding(.top, 8)
             }
-            .tint(STVTheme.accent)
-            .padding(20).padding(.top, 8)
+            .presentationDetents([.medium, .large])
         }
-        .presentationDetents([.medium, .large])
     }
 }

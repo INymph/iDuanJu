@@ -1,5 +1,5 @@
 import Foundation
-import Combine
+import Perception
 import CryptoKit
 
 /// One installed plugin (index entry). Files live in `Application Support/Plugins/<id>/`.
@@ -69,14 +69,14 @@ struct PluginSubscription: Codable, Hashable, Identifiable {
     var id: String { url }
 }
 
-@MainActor
-final class PluginStore: ObservableObject {
+@MainActor @Perceptible
+final class PluginStore {
     static let shared = PluginStore()
 
-    @Published private(set) var plugins: [InstalledPlugin] = []
-    @Published private(set) var subscriptions: [PluginSubscription] = []
+    private(set) var plugins: [InstalledPlugin] = []
+    private(set) var subscriptions: [PluginSubscription] = []
     /// Bumped on every change so views that read static snapshots re-render.
-    @Published private(set) var revision = 0
+    private(set) var revision = 0
 
     // Lock-protected copy for non-main readers (providers, runtime, DramaSource.label …).
     nonisolated(unsafe) private static var snap: [String: InstalledPlugin] = [:]
@@ -283,106 +283,49 @@ final class PluginStore: ObservableObject {
 
 /// Download / parse / validate a plugin before the user confirms. Nothing here touches installed state.
 enum PluginInstaller {
-    private final class NoRedirects:NSObject,URLSessionTaskDelegate,@unchecked Sendable {
-        func urlSession(_ session:URLSession,task:URLSessionTask,willPerformHTTPRedirection response:HTTPURLResponse,newRequest request:URLRequest,completionHandler:@escaping(URLRequest?)->Void){completionHandler(nil)}
-    }
-    static func checkedDownloadURL(_ value:String) throws -> URL {
-        guard let url=URL(string:value),url.scheme=="https",let host=url.host,!host.isEmpty,
-              url.user==nil,url.password==nil,url.port==nil || url.port==443,!NetGuard.isIPLiteral(host) else {
-            throw PluginError.install("插件/订阅地址只支持无凭证的 HTTPS 公网域名和443端口")
-        }
-        return url
-    }
     static let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.httpCookieStorage = nil
         c.httpShouldSetCookies = false
         c.urlCache = nil
         c.timeoutIntervalForRequest = 20
-        c.timeoutIntervalForResource = 30
-        return URLSession(configuration: c, delegate: NoRedirects(), delegateQueue: nil)
+        return URLSession(configuration: c)
     }()
 
     static func download(_ url: String, limit: Int) async throws -> Data {
-        var next=url
-        for hop in 0...5 {
-            let u=try checkedDownloadURL(next)
-            var req=URLRequest(url:u)
-            req.setValue("STV/\(AppInfo.version) plugin-installer",forHTTPHeaderField:"User-Agent")
-            let data:Data;let response:HTTPURLResponse
-            #if DEBUG
-            let fixture=PluginFixtures.responder?(req)
-            #else
-            let fixture:PluginFixtures.Reply?=nil
-            #endif
-            if let fixture {
-                data=fixture.body
-                response=HTTPURLResponse(url:u,statusCode:fixture.status,httpVersion:nil,headerFields:fixture.headers)!
-            } else {
-                if await Task.detached(operation:{NetGuard.resolvesToBlocked(u.host!)}).value { throw PluginError.install("插件/订阅地址解析到本机或内网，已拒绝") }
-                let (body,resp)=try await session.data(for:req)
-                guard let http=resp as? HTTPURLResponse else { throw PluginError.install("插件下载响应无效") }
-                data=body;response=http
-            }
-            if [301,302,303,307,308].contains(response.statusCode),let location=response.value(forHTTPHeaderField:"Location") {
-                guard hop<5,let target=URL(string:location,relativeTo:u)?.absoluteURL else { throw PluginError.install("插件跳转过多或地址无效") }
-                next=target.absoluteString;continue
-            }
-            guard (200..<300).contains(response.statusCode) else { throw PluginError.install("下载失败 HTTP \(response.statusCode)：\(u.host ?? "")") }
-            guard data.count<=limit else { throw PluginError.install("文件太大（>\(limit/1024)KB）") }
-            return data
+        guard let u = URL(string: url), u.scheme == "https" || u.scheme == "http", let host = u.host, !NetGuard.isIPLiteral(host) || !NetGuard.isBlockedIP(host) else {
+            throw PluginError.install("地址无效：\(url)")
         }
-        throw PluginError.install("插件跳转过多")
+        #if DEBUG
+        if let fx = PluginFixtures.responder, let r = fx(URLRequest(url: u)) { return r.body }
+        #endif
+        if await Task.detached(operation: { NetGuard.resolvesToBlocked(host) }).value {
+            throw PluginError.install("\(host) 解析到本机/内网地址，已拒绝")
+        }
+        var req = URLRequest(url: u)
+        req.setValue("STV/\(AppInfo.version) plugin-installer", forHTTPHeaderField: "User-Agent")
+        let (data, resp) = try await session.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else { throw PluginError.install("下载失败 HTTP \(code)：\(u.host ?? "")") }
+        guard data.count <= limit else { throw PluginError.install("文件太大（>\(limit / 1024)KB）") }
+        return data
     }
 
-    /// Text pasted / scanned by the user: a manifest URL, a subscription URL, an M3U URL, a bundle JSON or an M3U list.
-    enum Pasted { case plugin(PendingInstall), subscription(String), tvbox(TVBoxImport.Config) }
+    /// Text pasted / scanned by the user: a manifest URL, a subscription URL, or a bundle JSON.
+    enum Pasted { case plugin(PendingInstall), subscription(String) }
     static func interpret(_ text: String) async throws -> Pasted {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if M3UImport.isChannelList(t) { return .plugin(try prepareM3U(t, url: nil, name: nil, origin: "粘贴")) }
-        if let data = t.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           o["sites"] != nil || o["spider"] != nil || o["lives"] != nil {
-            return .tvbox(try TVBoxImport.parse(data))
-        }
         if t.hasPrefix("http://") || t.hasPrefix("https://") {
             let data = try await download(t, limit: 2 << 20)
-            if let list = String(data: data, encoding: .utf8), M3UImport.isChannelList(list) {
-                return .plugin(try prepareM3U(list, url: t, name: nil, origin: t))
-            }
             if let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                if o["sites"] != nil || o["spider"] != nil || o["lives"] != nil { return .tvbox(try TVBoxImport.parse(data)) }
                 if o["plugins"] != nil || o["cms"] != nil { return .subscription(t) }
                 if o["manifest"] != nil { return .plugin(try prepare(bundle: data, origin: t)) }
                 if o["schema"] != nil { return .plugin(try await prepare(manifestData: data, manifestURL: t, origin: t)) }
             }
-            throw PluginError.install("这个链接不是插件 manifest / .idjplugin / 订阅列表 / M3U")
+            throw PluginError.install("这个链接不是插件 manifest / .idjplugin / 订阅列表")
         }
         guard let data = t.data(using: .utf8) else { throw PluginError.install("无法识别") }
         return .plugin(try prepare(bundle: data, origin: "粘贴"))
-    }
-
-    /// A reviewed M3U channel list becomes a static video plugin, under the same rules as scripts/source-compat/m3u_to_idj.py.
-    static func prepareLive(_ live: TVBoxImport.Live) async throws -> PendingInstall {
-        let raw = String(decoding: try await download(live.url, limit: 2 << 20), as: UTF8.self)
-        if M3UImport.isChannelList(raw) { return try prepareM3U(raw, url: live.url, name: live.name, origin: "TVBox") }
-        var lines = ["#EXTM3U"]
-        for line in raw.split(whereSeparator: \.isNewline) {
-            guard let split = line.firstIndex(of: ",") else { continue }
-            let title = line[..<split].trimmingCharacters(in: .whitespaces)
-            let url = line[line.index(after: split)...].trimmingCharacters(in: .whitespaces)
-            if !title.isEmpty, url.hasPrefix("https://") { lines += ["#EXTINF:-1," + title, url] }
-        }
-        return try prepareM3U(lines.joined(separator: "\n"), url: live.url, name: live.name, origin: "TVBox")
-    }
-
-    static func prepareM3U(_ text: String, url: String?, name: String?, origin: String) throws -> PendingInstall {
-        let channels: [M3UImport.Channel]
-        do { channels = try M3UImport.parse(text, base: url) }
-        catch let e as M3UImport.Rejected { throw PluginError.install("M3U 导入失败：" + e.message) }
-        let given = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let title = !given.isEmpty ? given : (url.flatMap { M3UImport.name(fromURL: $0) } ?? "M3U 频道列表")
-        let data = try M3UImport.bundle(channels, name: title, id: M3UImport.importID(url ?? text), author: "M3U 导入")
-        return try prepare(bundle: data, origin: origin)
     }
 
     static func prepare(manifestURL: String, origin: String) async throws -> PendingInstall {
@@ -450,17 +393,6 @@ enum PluginInstaller {
 
     static func applySubscription(_ data: Data, to sub: inout PluginSubscription) throws {
         guard let o = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw PluginError.install("订阅不是 JSON 对象") }
-        // Reject foreign formats before mutating a saved subscription. Previously a TVBox
-        // object silently succeeded with zero entries and erased the last good list.
-        if o["sites"] != nil || o["spider"] != nil || o["lives"] != nil {
-            throw PluginError.install("这是 TVBox 配置，不是 idj1 订阅；不支持直接运行 JAR / CatVod / Python 源")
-        }
-        guard o["plugins"] is [Any] || o["cms"] is [Any] else {
-            throw PluginError.install("不是 idj1 订阅（需要 plugins 或 cms 数组）；阅读 RSS 规则不能直接导入")
-        }
-        for key in ["plugins", "cms"] where o[key] != nil && !(o[key] is [Any]) {
-            throw PluginError.install("订阅字段 \(key) 必须是数组")
-        }
         sub.name = o["name"] as? String ?? URL(string: sub.url)?.host ?? "订阅"
         let entries = (o["plugins"] as? [[String: Any]] ?? []).compactMap { e -> PluginSubscription.Entry? in
             guard let id = e["id"] as? String, let m = e["manifest"] as? String, let base = URL(string: sub.url),

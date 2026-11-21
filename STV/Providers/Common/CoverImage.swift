@@ -1,3 +1,4 @@
+import Perception
 import Foundation
 import UIKit
 import CommonCrypto
@@ -58,6 +59,34 @@ actor CoverStore {
         return cache
     }()
     private var inflight: [String: Task<UIImage, Error>] = [:]
+    private let posters: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.totalCostLimit = 32 * 1024 * 1024
+        cache.countLimit = 120
+        return cache
+    }()
+
+    /// Decode and resize away from the main actor before SwiftUI displays a poster.
+    /// Readers still use image(url:) so full-resolution manga pages are preserved.
+    func poster(url: String, headers: [String: String] = [:]) async throws -> UIImage {
+        if let cached = posters.object(forKey: url as NSString) { return cached }
+        let original = try await image(url: url, headers: headers)
+        try Task.checkCancellation()
+        // Another caller may have prepared this image while the download was suspended.
+        if let cached = posters.object(forKey: url as NSString) { return cached }
+        let result = Self.preparePoster(original)
+        let cost = result.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+        posters.setObject(result, forKey: url as NSString, cost: cost)
+        return result
+    }
+
+    nonisolated static func preparePoster(_ image: UIImage) -> UIImage {
+        let width = image.size.width * image.scale
+        let height = image.size.height * image.scale
+        guard width > 0, height > 0 else { return image }
+        let ratio = min(1, 640 / max(width, height))
+        return image.preparingThumbnail(of: CGSize(width: width * ratio, height: height * ratio)) ?? image
+    }
     private let session: URLSession = {
         let c = URLSessionConfiguration.default
         c.timeoutIntervalForRequest = 20
@@ -156,6 +185,7 @@ actor CoverStore {
 
     func clear() {
         memory.removeAllObjects()
+        posters.removeAllObjects()
         try? FileManager.default.removeItem(at: diskDir)
         try? FileManager.default.createDirectory(at: diskDir, withIntermediateDirectories: true)
     }
@@ -174,44 +204,48 @@ struct CoverView: View {
     @State private var failed = false
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                if let image {
-                    // scaledToFill overflows its frame; .clipped() only clips drawing, so without
-                    // .contentShape the invisible overflow kept receiving touches (1.2b4: the hero
-                    // backdrop's overflow sat on top of the search bar / channel row).
-                    Image(uiImage: image).resizable().scaledToFill()
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .clipped()
-                        .contentShape(Rectangle())
-                } else if failed {
-                    LinearGradient(colors: [Color.white.opacity(0.08), Color.white.opacity(0.02)],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing)
-                    Image(systemName: "film").font(.title2).foregroundStyle(.white.opacity(0.25))
-                } else {
-                    ShimmerBlock()
+        WithPerceptionTracking {
+            GeometryReader { geo in
+                WithPerceptionTracking {
+                    ZStack {
+                        if let image {
+                            // scaledToFill overflows its frame; .clipped() only clips drawing, so without
+                            // .contentShape the invisible overflow kept receiving touches (1.2b4: the hero
+                            // backdrop's overflow sat on top of the search bar / channel row).
+                            Image(uiImage: image).resizable().scaledToFill()
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .clipped()
+                                .contentShape(Rectangle())
+                        } else if failed {
+                            LinearGradient(colors: [Color.white.opacity(0.08), Color.white.opacity(0.02)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                            Image(systemName: "film").font(.title2).foregroundStyle(.white.opacity(0.25))
+                        } else {
+                            ShimmerBlock()
+                        }
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
                 }
             }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-        }
-        .modifier(CoverA11y(id: a11yID, state: image != nil ? "loaded" : failed ? "failed" : "loading"))
-        .task(id: url + "|" + (fallback ?? "")) {
-            image = nil; failed = false
-            var tried = Set<String>()
-            for u in [url, fallback ?? ""] where !u.isEmpty && tried.insert(u).inserted {
-                do {
-                    let loaded = try await CoverStore.shared.image(url: u, headers: headers)
-                    try Task.checkCancellation()
-                    image = loaded
-                    #if DEBUG
-                    if u != url { print("[STV] cover fallback used: \(url.prefix(80)) → \(u.prefix(80))") }
-                    #endif
-                    return
-                } catch { if Task.isCancelled { return } }
+            .modifier(CoverA11y(id: a11yID, state: image != nil ? "loaded" : failed ? "failed" : "loading"))
+            .task(id: url + "|" + (fallback ?? "")) {
+                image = nil; failed = false
+                var tried = Set<String>()
+                for u in [url, fallback ?? ""] where !u.isEmpty && tried.insert(u).inserted {
+                    do {
+                        let loaded = try await CoverStore.shared.poster(url: u, headers: headers)
+                        try Task.checkCancellation()
+                        image = loaded
+                        #if DEBUG
+                        if u != url { print("[STV] cover fallback used: \(url.prefix(80)) → \(u.prefix(80))") }
+                        #endif
+                        return
+                    } catch { if Task.isCancelled { return } }
+                }
+                failed = true
             }
-            failed = true
         }
     }
 }
@@ -220,25 +254,29 @@ private struct CoverA11y: ViewModifier {
     let id: String?
     let state: String
     func body(content: Content) -> some View {
-        if let id { content.accessibilityElement(children: .ignore).accessibilityIdentifier(id).accessibilityValue(state) }
-        else { content }
+        WithPerceptionTracking {
+            if let id { content.accessibilityElement(children: .ignore).accessibilityIdentifier(id).accessibilityValue(state) }
+            else { content }
+        }
     }
 }
 
 struct ShimmerBlock: View {
     @State private var phase: CGFloat = -1
     var body: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color.white.opacity(0.06))
-            .overlay(
-                LinearGradient(colors: [.clear, .white.opacity(0.12), .clear],
-                               startPoint: .leading, endPoint: .trailing)
-                    .offset(x: phase * 200)
-            )
-            .clipped()
-            .onAppear {
-                withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) { phase = 1.2 }
-            }
+        WithPerceptionTracking {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+                .overlay(
+                    LinearGradient(colors: [.clear, .white.opacity(0.12), .clear],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .offset(x: phase * 200)
+                )
+                .clipped()
+                .onAppear {
+                    withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) { phase = 1.2 }
+                }
+        }
     }
 }
 

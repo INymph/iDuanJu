@@ -1,8 +1,7 @@
 package app.iduanju
 
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import app.iduanju.core.novel.NovelSources
 import app.iduanju.novel.NovelScreen
@@ -16,7 +15,7 @@ import org.junit.Test
 import java.io.File
 
 class NovelThemeTest {
-    @get:Rule val ui = createAndroidComposeRule<ComponentActivity>()
+    @get:Rule val ui = createComposeRule()
     @Before fun seed() {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val source=JSONObject().put("bookSourceUrl","https://preview.invalid").put("bookSourceName","界面验收 · 合成数据")
@@ -48,12 +47,7 @@ class NovelThemeTest {
         android.os.SystemClock.sleep(700)
         val instrumentation=InstrumentationRegistry.getInstrumentation()
         val path=File(instrumentation.targetContext.getExternalFilesDir(null),"novel-$name.png")
-        val bitmap = ui.runOnIdle {
-            val root = ui.activity.window.decorView
-            android.graphics.Bitmap.createBitmap(root.width, root.height, android.graphics.Bitmap.Config.ARGB_8888).also {
-                root.draw(android.graphics.Canvas(it))
-            }
-        }
+        val bitmap=instrumentation.uiAutomation.takeScreenshot()
         try { path.outputStream().use{bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)} }
         finally {bitmap.recycle()}
         saveNovelEvidence(path.name,path.readBytes())
@@ -96,29 +90,6 @@ class NovelThemeTest {
         val nc=app.iduanju.core.novel.NovelCache(File(ctx.filesDir,"novel-cache-v2"))
         ui.waitUntil(30000){nc.books().any{it.book.name=="雾港" && nc.count(it.source,it.book.url,it.chapters)>=50}}
         screenshot("$style-download-50-complete")
-    }
-    @Test fun groupedSearchReturnsToSelectedRanking() {
-        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
-        val prefs = ctx.getSharedPreferences("novel", 0)
-        val sources = JSONArray(prefs.getString("sources", "[]"))
-        val other = JSONObject(sources.getJSONObject(0).toString()).put("bookSourceUrl", "https://second.invalid")
-            .put("bookSourceName", "第二书源")
-        prefs.edit().putString("sources", sources.put(other).toString()).commit()
-        ui.setContent { IdjTheme { NovelScreen({}) } }
-        ui.onNodeWithText("排行榜").performClick()
-        ui.waitUntil(10000) { ui.onAllNodesWithText("畅销榜").fetchSemanticsNodes().isNotEmpty() }
-        ui.onNodeWithText("畅销榜").performClick()
-        ui.onNodeWithContentDescription("搜书").performClick()
-        ui.onNode(hasSetTextAction()).performTextInput("雾港")
-        ui.onNode(hasSetTextAction()).performImeAction()
-        try { ui.waitUntil(10000) { ui.onAllNodesWithText("2 个书源").fetchSemanticsNodes().isNotEmpty() } } catch (e: Throwable) { throw AssertionError(ui.onRoot().printToString(), e) }
-        ui.onAllNodesWithText("雾港").onLast().performClick()
-        ui.onNodeWithTag("novel.detail.read").assertIsDisplayed()
-        ui.onNodeWithContentDescription("返回").performClick()
-        ui.onNode(hasSetTextAction()).assertTextContains("雾港")
-        ui.onNodeWithContentDescription("返回").performClick()
-        ui.onNodeWithText("畅销榜").assertIsDisplayed()
-        ui.onNodeWithText("灯塔来信").assertIsDisplayed()
     }
     @Test fun lightThemeFlow(){verify(false)}
     @Test fun darkThemeFlow(){verify(true)}

@@ -96,7 +96,7 @@ final class CENCStreamTests: XCTestCase {
 }
 
 /// Network (`STV_LIVE_HG=1`): a real 红果 episode streamed through the decrypting proxy is byte-identical
-/// to the whole-file decrypt, Aether plays it, and the first frame comes before the full download would.
+/// to the whole-file decrypt, AVPlayer plays it, and the first frame comes before the full download would.
 @MainActor
 final class CENCStreamLiveTests: XCTestCase {
     func testLiveHongguoStreamMatchesFullDecryptAndPlays() async throws {
@@ -128,13 +128,13 @@ final class CENCStreamLiveTests: XCTestCase {
         }
         let s = try XCTUnwrap(r.streams.first { $0.kind == .mp4Cenc }, "no CENC stream: \(r.streams.map(\.kind))")
 
-        // Streaming: header → plan → playable through Aether.
+        // Streaming: header → plan → playable through AVPlayer.
         let t0 = Date()
  let p = try XCTUnwrap(LocalHLSProxy.shared.cencMP4URL(s.url, headers: s.headers, key: s.key, budget: 0))
         defer { if let t = LocalHLSProxy.token(of: p) { LocalHLSProxy.shared.release(t) } }
         try await LocalHLSProxy.shared.prepareCENC(p)
         let tPlan = Date().timeIntervalSince(t0)
-        let e = try MPVPlayerEngine()
+        let e = AVPlayerEngine()
         defer { e.stop() }
         try await e.load(.direct(URL(string: p)!), stream: nil, start: nil, title: "hg")
         e.muted = true
@@ -237,14 +237,14 @@ final class CENCThrottledStartupTests: XCTestCase {
             stream.backupURL = nil
      stream.streamId = "throttle-\(bps)-\(UUID().uuidString.prefix(6))"
 
-     // Old: whole download + decrypt, then Aether to first second.
+     // Old: whole download + decrypt, then AVPlayer to first second.
      var t = Date()
      let file = try await EpisodePlaybackLoader.playableFile(vid: ep.vid, stream: stream)
      let oldPlay = try await firstSecond(.file(file))
      let oldTotal = Date().timeIntervalSince(t)
      try? FileManager.default.removeItem(at: file)
 
-     // New: header → plan → Aether through the decrypting proxy.
+     // New: header → plan → AVPlayer through the decrypting proxy.
      t = Date()
      let p = try XCTUnwrap(LocalHLSProxy.shared.cencMP4URL(stream.url, headers: [:], key: s.key, budget: PlaybackCoordinator.cencBudget))
      try await LocalHLSProxy.shared.prepareCENC(p)
@@ -259,7 +259,7 @@ final class CENCThrottledStartupTests: XCTestCase {
     /// Seconds from load to 1 s of decoded playback.
     private func firstSecond(_ src: PlaybackCoordinator.Source) async throws -> Double {
         let t = Date()
-        let e = try MPVPlayerEngine()
+        let e = AVPlayerEngine()
         defer { e.stop() }
         try await e.load(src, stream: nil, start: nil, title: "t")
         e.muted = true

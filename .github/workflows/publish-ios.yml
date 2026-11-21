@@ -73,7 +73,7 @@ jobs:
             exit 1
           fi
           cat > notes.md <<EOF
-          iOS ${RELEASE_TAG#v} · 未签名 IPA（最低 iOS 16+ · 支持侧载 / iPad）
+          iOS ${RELEASE_TAG#v} · 未签名 IPA（最低 iOS 18）
 
           - 修复 Xcode 编译失败：分类请求 session 遮蔽、数值类型歧义、时长表达式推导超时。
           - 苹果 CMS 分类独立分页、完整分类刷新、错误提示与父分类空结果说明。

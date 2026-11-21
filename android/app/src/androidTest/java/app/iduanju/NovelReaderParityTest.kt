@@ -29,17 +29,15 @@ class NovelReaderParityTest {
         assertEquals("874efe33cbe38b7dcf830704b5bd0614b9485fe1974a20d9c09030ebec07df30",java.security.MessageDigest.getInstance("SHA-256").digest(raw.toByteArray()).joinToString(""){"%02x".format(it)})
         val source=NovelSources.import(raw).first{it.name=="七猫小说"}
         val cache=NovelCache(File(ctx.filesDir,"novel-cache-v2"));val book=cache.books().first{it.source==source.id&&it.book.name=="无敌天命"}
-        assertTrue("Live TOC must include the original 1694 chapters", book.chapters.size >= 1694)
+        assertEquals(1694,book.chapters.size)
         assertTrue(cache.read(source.id,book.book.url,book.chapters[0].url)!!.contains("青州"))
         assertNotNull(cache.read(source.id,book.book.url,book.chapters[1].url))
         prefs.edit().clear().putString("sources",raw).putString("rankSource",source.id).putString("reader.settings","{\"font\":18,\"spacing\":0.5,\"margin\":0.3,\"indent\":true,\"theme\":0,\"turn\":\"slide\",\"fontID\":\"system\"}").commit()
         NovelSources.fixture={error("Offline native parity test: network forbidden")}
         ui.runOnUiThread{ui.activity.enableEdgeToEdge()}
         ui.setContent{IdjTheme(dark=false){NovelScreen({})}}
-        ui.onNodeWithTag("novel.shelf").performScrollToNode(hasText(book.book.name))
-        ui.onAllNodesWithText(book.book.name).onLast().performClick()
+        ui.onAllNodesWithText("无敌天命",substring=false).onLast().performClick()
         ui.waitUntil(10000){runCatching{ui.onNodeWithTag("novel.detail.read").assertIsEnabled()}.isSuccess}
-        ui.onNodeWithText("共 ${book.chapters.size} 章").assertIsDisplayed()
         shot("01-real-detail")
         ui.onNodeWithTag("novel.detail.read").performClick()
         ui.waitUntil(10000){ui.onAllNodesWithTag("novel.page").fetchSemanticsNodes().isNotEmpty()}
@@ -86,7 +84,7 @@ class NovelReaderParityTest {
         ui.onNodeWithTag("novel.menu.info").performClick();shot("10-info")
         ui.onNodeWithTag("novel.menu.toc").performClick();shot("13-real-toc");ui.onNodeWithText("当前读到").assertIsDisplayed();
         val actualText=cache.read(source.id,book.book.url,book.chapters[0].url)!!.lines().map{it.trim()}.filter{it.isNotBlank()}.joinToString("\n")
-        val query=Regex("[一-鿿]{6,}").find(actualText,1000)!!.value.take(6)
+        val query=Regex("[\\p{IsHan}]{6,}").find(actualText,1000)!!.value.take(6)
         val hit=cache.search(source.id,book.book.url,book.chapters,query).first{it.chapter==0&&it.offset>=1000}
         ui.onNodeWithTag("novel.toc.search").performTextInput(query);ui.onNodeWithTag("novel.toc.search").performImeAction()
         val hitTag="novel.toc.hit.0.${hit.offset}"

@@ -1,45 +1,52 @@
+import Perception
 import SwiftUI
 
 struct LibraryListView: View {
     enum Kind { case favorites, history }
     let kind: Kind
-    @ObservedObject private var library = LibraryStore.shared
+    private let library = LibraryStore.shared
     @Environment(\.zoomNS) private var ns
     @State private var confirmClear = false
 
     var body: some View {
-        Group {
-            if kind == .favorites {
-                ScrollView {
-                    if library.favorites.isEmpty { empty("还没有收藏", "heart") }
-                    else { NumberedGrid(items: library.favorites, numbered: false).padding(.vertical, 8) }
-                }
-            } else if library.continueWatching.isEmpty {
-                ScrollView { empty("还没有观看记录", "clock") }
-            } else {
-                // Deleting a record (issue #3): ✕ on every row, swipe left, or long-press anywhere on the row;
-                // 清空 in the bar removes all of them after a confirmation.
-                List {
-                    ForEach(library.continueWatching) { p in historyRow(p) }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-            }
-        }
-        .background(STVTheme.bg.ignoresSafeArea())
-        .navigationTitle(kind == .favorites ? "我的收藏" : "观看历史")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if kind == .history, !library.continueWatching.isEmpty {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("清空") { confirmClear = true }.accessibilityIdentifier("history.clear")
+        WithPerceptionTracking {
+            Group {
+                if kind == .favorites {
+                    ScrollView {
+                        if library.favorites.isEmpty { empty("还没有收藏", "heart") }
+                        else { NumberedGrid(items: library.favorites, numbered: false).padding(.vertical, 8) }
+                    }
+                } else if library.continueWatching.isEmpty {
+                    ScrollView { empty("还没有观看记录", "clock") }
+                } else {
+                    // Deleting a record (issue #3): ✕ on every row, swipe left, or long-press anywhere on the row;
+                    // 清空 in the bar removes all of them after a confirmation.
+                    List {
+                        WithPerceptionTracking {
+                            ForEach(library.continueWatching) { p in WithPerceptionTracking {
+                                historyRow(p)
+                            } }
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
             }
-        }
-        .confirmationDialog("清空全部观看记录？", isPresented: $confirmClear, titleVisibility: .visible) {
-            Button("清空 \(library.continueWatching.count) 条记录", role: .destructive) { withAnimation { library.clearHistory() } }
-        } message: {
-            Text("只删除本机的观看进度，收藏不受影响。")
+            .background(STVTheme.bg.ignoresSafeArea())
+            .navigationTitle(kind == .favorites ? "我的收藏" : "观看历史")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if kind == .history, !library.continueWatching.isEmpty {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("清空") { confirmClear = true }.accessibilityIdentifier("history.clear")
+                    }
+                }
+            }
+            .confirmationDialog("清空全部观看记录？", isPresented: $confirmClear, titleVisibility: .visible) {
+                Button("清空 \(library.continueWatching.count) 条记录", role: .destructive) { withAnimation { library.clearHistory() } }
+            } message: {
+                Text("只删除本机的观看进度，收藏不受影响。")
+            }
         }
     }
 
@@ -78,6 +85,6 @@ struct LibraryListView: View {
     }
 
     private func empty(_ t: String, _ icon: String) -> some View {
-        CompatEmptyStateView(title: t, systemImage: icon).padding(.top, 80)
+        UnavailableStateView(t, systemImage: icon).padding(.top, 80)
     }
 }

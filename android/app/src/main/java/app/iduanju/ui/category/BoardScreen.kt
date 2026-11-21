@@ -63,11 +63,11 @@ fun BoardScreen(board: BoardSpec, onBack: () -> Unit, onOpenDetail: (String) -> 
             IconButton(onBack, Modifier.align(Alignment.CenterStart)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = c.text) }
             Text(board.title, color = c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Center))
         }
-        LazyVerticalGrid(GridCells.Fixed(app.iduanju.ui.components.LocalLayoutMetrics.current.posterCols), Modifier.fillMaxSize(), state = grid,
+        LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize(), state = grid,
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             itemsIndexed(items, key = { _, s -> s.seriesId }) { i, s -> NumberedPosterCell(s, i + 1, onOpenDetail) }
-            item(span = { GridItemSpan(maxLineSpan) }) {
+            item(span = { GridItemSpan(3) }) {
                 Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
                     when {
                         loading -> CircularProgressIndicator(color = c.secondary, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))

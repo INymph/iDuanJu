@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 
 enum TGFmt {
@@ -34,15 +35,17 @@ struct TGPostCard: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        if verdict.blocked && !unfolded {
-            folded
-        } else {
-            card
+        WithPerceptionTracking {
+            if verdict.blocked && !unfolded {
+                folded
+            } else {
+                card
+            }
         }
     }
 
     private var folded: some View {
-        Button { withAnimation(.compatSnappy) { unfolded = true } } label: {
+        Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { unfolded = true } } label: {
             HStack(spacing: 8) {
                 Image(systemName: "eye.slash").font(.caption)
                 Text("已屏蔽 · \(channel?.displayName ?? "@" + post.channel)").font(.caption.weight(.semibold))
@@ -141,12 +144,14 @@ struct TGPostCard: View {
     private var buttons: some View {
         VStack(spacing: 6) {
             ForEach(Array(post.buttons.enumerated()), id: \.offset) { _, b in
-                Button {
-                    if let bot = TGBotLink(url: b.url) { actions.bot(bot) } else if let u = URL(string: b.url) { openURL(u) }
-                } label: {
-                    Text(b.text).font(.subheadline).foregroundStyle(STVTheme.text).frame(maxWidth: .infinity).frame(height: 34)
-                        .background(STVTheme.text.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                }.buttonStyle(.plain)
+                WithPerceptionTracking {
+                    Button {
+                        if let bot = TGBotLink(url: b.url) { actions.bot(bot) } else if let u = URL(string: b.url) { openURL(u) }
+                    } label: {
+                        Text(b.text).font(.subheadline).foregroundStyle(STVTheme.text).frame(maxWidth: .infinity).frame(height: 34)
+                            .background(STVTheme.text.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    }.buttonStyle(.plain)
+                }
             }
         }
     }
@@ -157,8 +162,10 @@ struct TGPostCard: View {
             if !post.views.isEmpty { Label(post.views, systemImage: "eye").font(.caption).foregroundStyle(STVTheme.secondary) }
             Spacer()
             ForEach(post.botLinks, id: \.self) { b in
-                Button { actions.bot(b) } label: { Label("@\(b.bot)", systemImage: "cpu").font(.caption) }
-                    .foregroundStyle(STVTheme.accent).buttonStyle(.plain)
+                WithPerceptionTracking {
+                    Button { actions.bot(b) } label: { Label("@\(b.bot)", systemImage: "cpu").font(.caption) }
+                        .foregroundStyle(STVTheme.accent).buttonStyle(.plain)
+                }
             }
             if post.media.contains(where: { $0.video != nil || $0.kind == .photo }) {
                 Button { actions.download(post, firstDownloadable) } label: { Image(systemName: "arrow.down.circle") }
@@ -188,13 +195,19 @@ struct TGMediaGrid: View {
     let post: TGPost
     var actions: TGActions
     var body: some View {
-        let m = post.media
-        if m.count == 1 {
-            cell(0).aspectRatio(m[0].kind == .photo ? 4 / 3 : 16 / 9, contentMode: .fit).frame(maxWidth: .infinity)
-        } else {
-            let cols = m.count <= 4 ? 2 : 3
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: cols), spacing: 4) {
-                ForEach(m.indices, id: \.self) { i in cell(i).aspectRatio(1, contentMode: .fit) }
+        WithPerceptionTracking {
+            let m = post.media
+            if m.count == 1 {
+                cell(0).aspectRatio(m[0].kind == .photo ? 4 / 3 : 16 / 9, contentMode: .fit).frame(maxWidth: .infinity)
+            } else {
+                let cols = m.count <= 4 ? 2 : 3
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: cols), spacing: 4) {
+                    WithPerceptionTracking {
+                        ForEach(m.indices, id: \.self) { i in WithPerceptionTracking {
+                            cell(i).aspectRatio(1, contentMode: .fit)
+                        } }
+                    }
+                }
             }
         }
     }

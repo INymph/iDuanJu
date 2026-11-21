@@ -13,9 +13,9 @@ packages:
     exactVersion: 1.5.2-tdlib-1.8.69-6126ecae
   QuickJS:
     path: Packages/QuickJS
-  MPVKit:
-    url: https://github.com/mpvkit/MPVKit
-    from: 1.0.0
+  Perception:
+    url: https://github.com/pointfreeco/swift-perception
+    exactVersion: 1.6.0
 targets:
   STV:
     type: application
@@ -26,13 +26,13 @@ targets:
       - package: TDLibKit
       - package: QuickJS
         product: CQuickJS
-      - package: MPVKit
-        product: MPVKit
+      - package: Perception
+        product: Perception
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.local.STV
       GENERATE_INFOPLIST_FILE: YES
-      MARKETING_VERSION: "1.6"
-      CURRENT_PROJECT_VERSION: "17"
+      MARKETING_VERSION: "1.12"
+      CURRENT_PROJECT_VERSION: "22"
       SWIFT_EMIT_LOC_STRINGS: YES
       ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor

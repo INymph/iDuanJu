@@ -55,9 +55,7 @@ class HomeHeroLayoutTest {
             assertTrue("Metadata cannot crowd button", bottom + 6 * density <= cta.top + 1)
             val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
             node("home.hero.ctaText.$i").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-            assertTrue("$label page=$i CTA text must have no overflow: " + layouts.joinToString {
-                "cta=$cta text=$text size=${it.size}, paragraphWidth=${it.multiParagraph.width}, constraints=${it.layoutInput.constraints}, softWrap=${it.layoutInput.softWrap}, widthOverflow=${it.didOverflowWidth}, heightOverflow=${it.didOverflowHeight}, style=${it.layoutInput.style}"
-            }, layouts.isNotEmpty() && layouts.none { it.hasVisualOverflow })
+            assertTrue("CTA text must have no overflow", layouts.isNotEmpty() && layouts.none { it.hasVisualOverflow })
             if(firstHeight == null) firstHeight = page.height else assertEquals("Pager height cannot jump with title length", firstHeight!!, page.height, 1f)
             val titleText = node("home.hero.title.$i").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString { it.text }
             Log.i("IDJ_HOME_TEST", "$label page=$i title=$titleText page=$page titleRect=$title cta=$cta pill=$pill text=$text dots=$dots metadata=$metas")

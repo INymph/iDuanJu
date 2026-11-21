@@ -27,7 +27,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -40,7 +39,6 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
@@ -52,7 +50,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.sp
 import app.iduanju.ui.theme.IdjThemeColors
 import coil.compose.AsyncImage
@@ -134,25 +131,11 @@ fun AmbientGlow(cool: Boolean = false, visible: Boolean = true, modifier: Modifi
     val cs = if (cool) c.ambientCool else c.ambientWarm
     val a by animateFloatAsState(if (visible) 1f else 0f, label = "amb")
     Box(modifier.fillMaxWidth().height(380.dp).graphicsLayer { alpha = a }.drawWithContent {
-        drawRect(ambientBrush(cs, cool, size.width, size.height))
+        val r = size.width * 1.3f
+        drawRect(Brush.radialGradient(0f to cs[0], (if (cool) 0.40f else 0.36f) to cs[1], 0.72f to cs[1].copy(alpha = 0f),
+            center = Offset(size.width * 0.25f, -size.height * 0.08f), radius = r))
     })
 }
-
-/** [DSPage]'s ground and glow as a background, for screens whose root is a Column rather than a Box. */
-@Composable
-fun Modifier.dsAmbient(cool: Boolean = false): Modifier {
-    val c = IdjThemeColors
-    val cs = if (cool) c.ambientCool else c.ambientWarm
-    return drawBehind {
-        drawRect(c.bg)
-        val h = 380.dp.toPx()
-        drawRect(ambientBrush(cs, cool, size.width, h), size = androidx.compose.ui.geometry.Size(size.width, minOf(h, size.height)))
-    }
-}
-
-private fun ambientBrush(cs: List<Color>, cool: Boolean, width: Float, height: Float) =
-    Brush.radialGradient(0f to cs[0], (if (cool) 0.40f else 0.36f) to cs[1], 0.72f to cs[1].copy(alpha = 0f),
-        center = Offset(width * 0.25f, -height * 0.08f), radius = width * 1.3f)
 
 /** Page ground + top glow. */
 @Composable
@@ -257,19 +240,10 @@ fun ToneChip(title: String, on: Boolean, neutral: Boolean = false, small: Boolea
 @Composable
 fun <T> ChipRow(items: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit, neutral: (T) -> Boolean = { false },
                 small: Boolean = false, fade: Boolean = true, start: Dp = 16.dp, modifier: Modifier = Modifier) {
-    // fadeEnd renders offscreen and clips to its bounds; bleeding the row vertically keeps the
-    // selected neutral chip's shadow (`.chip.all.on`) from being cut off.
-    Row(modifier.fillMaxWidth().verticalBleed(6.dp).then(if (fade) Modifier.fadeEnd() else Modifier).horizontalScroll(rememberScrollState())
-        .padding(start = start, end = 24.dp, top = 6.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(modifier.fillMaxWidth().then(if (fade) Modifier.fadeEnd() else Modifier).horizontalScroll(rememberScrollState())
+        .padding(start = start, end = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items.forEach { ToneChip(label(it), it == selected, neutral(it), small) { onSelect(it) } }
     }
-}
-
-/** Measures the content [by] taller on each side than the space it reports, so shadows can draw into that margin. */
-private fun Modifier.verticalBleed(by: Dp): Modifier = layout { measurable, constraints ->
-    val px = by.roundToPx()
-    val placeable = measurable.measure(constraints.offset(vertical = 2 * px))
-    layout(placeable.width, (placeable.height - 2 * px).coerceAtLeast(0)) { placeable.place(0, -px) }
 }
 
 fun Modifier.fadeEnd(from: Float = 0.84f): Modifier = this.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithContent {
@@ -441,11 +415,10 @@ fun PosterArt(url: String, modifier: Modifier = Modifier, corner: Dp = 12.dp, ra
         AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         Box(Modifier.matchParentSize().background(Brush.verticalGradient(0.46f to Color.Transparent, 1f to Color.Black.copy(0.62f))))
         if (rank != null) {
-            val medal = when (rank) { 1 -> Color(0xFFFFC740); 2 -> Color(0xFFAEBBD6); 3 -> Color(0xFFDB8C52); else -> Color.Black }
-            val off = with(LocalDensity.current) { 2.dp.toPx() }
-            Text("$rank", Modifier.align(Alignment.TopStart).padding(start = 7.dp), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Black,
-                fontStyle = FontStyle.Italic, style = androidx.compose.ui.text.TextStyle(lineHeight = 36.sp, shadow = androidx.compose.ui.graphics.Shadow(medal, Offset(off, off), 0f),
-                    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)))
+            Text("$rank", Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 4.dp), color = when (rank) {
+                1 -> Color(0xFFFFC740); 2 -> Color(0xFFADBAD6); 3 -> Color(0xFFDB8C52); else -> Color.White
+            }, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, fontStyle = FontStyle.Italic,
+                style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(0.4f), Offset(0f, 2f), 6f)))
         }
         if (!badge.isNullOrEmpty()) Text(badge, Modifier.align(Alignment.BottomStart).padding(8.dp), color = Color.White.copy(0.9f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }

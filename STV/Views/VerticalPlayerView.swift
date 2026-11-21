@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import AVFoundation
 import AVKit
@@ -10,20 +11,21 @@ struct VerticalPlayerView: View {
     @State private var switched: HGSeries?
 
     var body: some View {
-        let s = switched ?? series
-        PlayerScreen(series: s, startIndex: switched == nil ? startIndex : nil) { next in switched = next }
-            .id(s.id)
+        WithPerceptionTracking {
+            let s = switched ?? series
+            PlayerScreen(series: s, startIndex: switched == nil ? startIndex : nil) { next in switched = next }
+                .id(s.id)
+        }
     }
 }
 
 struct PlayerScreen: View {
     let series: HGSeries
     let startIndex: Int?
-    private let suppliedDetail: HGSeriesDetail?
     var onSwitchSeries: (HGSeries) -> Void = { _ in }
-    @StateObject private var co: PlaybackCoordinator
+    @State private var co: PlaybackCoordinator
     @State private var seasons: [HGSeries] = []
-    @ObservedObject private var danmaku = DanmakuSettings.shared
+    private let danmaku = DanmakuSettings.shared
     /// 画面铺满 (aspectFill) vs 完整自适应 (aspect) — hongguo-open-player fitMode.
     @AppStorage("stv.player.fill") private var fillScreen = false
     /// Technical info strip (⋯ → 技术信息).
@@ -31,7 +33,7 @@ struct PlayerScreen: View {
     @State private var muted = false
     @State private var osd: String?
     @State private var verifyTarget: VerifyTarget?
-    @StateObject private var adjuster = PlayerAdjuster()
+    @State private var adjuster = PlayerAdjuster()
     @State private var loadError: Error?
     @State private var showChrome = true
     @State private var lastInteraction = Date()
@@ -52,25 +54,19 @@ struct PlayerScreen: View {
     @State private var pendingCancel = false
     @State private var speedBaseIndex = 0
     @State private var lastStepOffset = 0
-    @State private var padDrawerOpen = true
     /// Feed content offset (pt): the shared video layer rides along with the page in either orientation.
     @State private var feedScrollY: CGFloat = 0
     /// Running double-tap seek (+10/+20/… s) and which side it is on; drives the side bubble.
     @State private var seekRun: (total: Int, at: Date)?
     @Environment(\.verticalSizeClass) private var vClass
-    @Environment(\.layoutMetrics) private var layoutMetrics
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var library = LibraryStore.shared
+    private let library = LibraryStore.shared
 
-    private var landscape: Bool { vClass == .compact || (layoutMetrics.isPad && layoutMetrics.isLandscape) }
-    private var canShowPadSplit: Bool {
-        layoutMetrics.isPad && layoutMetrics.isLandscape && layoutMetrics.width >= 840 && aspect < 1.0 && !co.pipActive && !co.episodes.isEmpty
-    }
+    private var landscape: Bool { vClass == .compact }
 
-    init(series: HGSeries, startIndex: Int?, detail: HGSeriesDetail? = nil, resolve: ((Int) async throws -> PlaybackCoordinator.Source)? = nil, onSwitchSeries: @escaping (HGSeries) -> Void = { _ in }) {
+    init(series: HGSeries, startIndex: Int?, onSwitchSeries: @escaping (HGSeries) -> Void = { _ in }) {
         self.series = series; self.startIndex = startIndex; self.onSwitchSeries = onSwitchSeries
-        suppliedDetail = detail
-        _co = StateObject(wrappedValue: PlaybackCoordinator(series: series, resolve: resolve))
+        _co = State(initialValue: PlaybackCoordinator(series: series))
     }
 
     // MARK: Geometry
@@ -95,181 +91,172 @@ struct PlayerScreen: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-        GeometryReader { outer in
-            let ins = outer.safeAreaInsets
-            GeometryReader { geo in
-                let full = geo.size
-                let area = videoArea(full)
-                let rect = videoRect(area)
-                ZStack(alignment: .topLeading) {
-                    Color.black
-                    // A single in-window layer remains the PiP source across paging, rotation and buffering.
-                    PlayerLayerView(coordinator: co, fill: fillScreen, engine: co.engineKind)
-                        .accessibilityElement(children: .contain).accessibilityIdentifier(suppliedDetail == nil ? "player.video" : "novel.media.status").accessibilityValue(suppliedDetail == nil ? (fillScreen ? "fill" : "fit") : String(format: "已播放 %.2f 秒", co.time))
-                        .frame(width: area.width, height: area.height).offset(x: area.minX, y: area.minY - pageDrift(co.current ?? 0, page: full.height))
-                        .allowsHitTesting(false)
-                    if let held = co.heldFrame {
-                        // Previous episode's last frame, riding with the swipe until the next one is on screen.
-                        Image(uiImage: held.image).resizable()
-                            .frame(width: area.width, height: area.height).offset(x: area.minX, y: area.minY - pageDrift(held.index, page: full.height))
-                            .allowsHitTesting(false).accessibilityHidden(true)
-                    }
-                    Group {
-                        if co.current != nil {
-                            episodeFeed
-                        } else if let loadError {
-                            ErrorStateView(error: loadError) { Task { await load() } }
-                        } else {
-                            PosterBackdrop(url: series.cover).overlay(ProgressView().tint(.white))
+        WithPerceptionTracking {
+            GeometryReader { outer in
+                WithPerceptionTracking {
+                    let ins = outer.safeAreaInsets
+                    GeometryReader { geo in
+                        WithPerceptionTracking {
+                            let full = geo.size
+                            let area = videoArea(full)
+                            let rect = videoRect(area)
+                            ZStack(alignment: .topLeading) {
+                                Color.black
+                                // A single in-window layer remains the PiP source across paging, rotation and buffering.
+                                PlayerLayerView(coordinator: co, fill: fillScreen, engine: co.engineKind)
+                                    .accessibilityElement(children: .contain).accessibilityIdentifier("player.video").accessibilityValue(fillScreen ? "fill" : "fit")
+                                    .frame(width: area.width, height: area.height).offset(x: area.minX, y: area.minY - pageDrift(co.current ?? 0, page: full.height))
+                                    .allowsHitTesting(false)
+                                if let held = co.heldFrame {
+                                    // Previous episode's last frame, riding with the swipe until the next one is on screen.
+                                    Image(uiImage: held.image).resizable()
+                                        .frame(width: area.width, height: area.height).offset(x: area.minX, y: area.minY - pageDrift(held.index, page: full.height))
+                                        .allowsHitTesting(false).accessibilityHidden(true)
+                                }
+                                Group {
+                                    if co.current != nil {
+                                        episodeFeed
+                                    } else if let loadError {
+                                        ErrorStateView(error: loadError) { Task { await load() } }
+                                    } else {
+                                        PosterBackdrop(url: series.cover).overlay(ProgressView().tint(.white))
+                                    }
+                                }
+                                .frame(width: full.width, height: full.height)
+                                if let sub = co.subtitleText, !co.pipActive {
+                                    // Optional host-drawn cues; AVPlayer renders native subtitle tracks.
+                                    VStack {
+                                        Spacer()
+                                        Text(sub).font(.system(size: landscape ? 18 : 16, weight: .semibold)).foregroundStyle(.white)
+                                            .multilineTextAlignment(.center).shadow(color: .black, radius: 2).shadow(color: .black.opacity(0.8), radius: 4)
+                                            .padding(.horizontal, 24)
+                                            .padding(.bottom, (landscape ? 70 : 200) + ins.bottom)
+                                            .accessibilityIdentifier("player.subtitle")
+                                    }
+                                    .frame(width: full.width, height: full.height).allowsHitTesting(false)
+                                }
+                                if series.source == .hongguo, danmaku.enabled, !co.pipActive, !speedMode,
+                                   let i = co.current, co.readyIndex == i, co.episodes.indices.contains(i) {
+                                    danmakuLayer(i, full: full, ins: ins)
+                                }
+                                // Expanded controls alone need contrast scrims. Compact always-on chrome is transparent.
+                                if !co.pipActive, controlsVisible && !locked {
+                                    gradients(full)
+                                }
+                                if panel != nil {
+                                    Color.black.opacity(0.5).frame(width: full.width, height: full.height)
+                                        .contentShape(Rectangle()).onTapGesture { closePanel() }
+                                        .accessibilityIdentifier("player.scrim")
+                                }
+                                if co.pipActive {
+                                    Button { co.togglePiP() } label: {
+                                        Label("返回播放器", systemImage: "pip.exit")
+                                            .padding(.horizontal, 20).padding(.vertical, 12)
+                                            .background(STVTheme.surface, in: Capsule())
+                                    }
+                                    .foregroundStyle(.white)
+                                    .position(x: full.width / 2, y: full.height / 2)
+                                } else {
+                                    if locked {
+                                        if controlsVisible { lockOnly(full, ins: ins).transition(.opacity) }
+                                    } else if controlsVisible, !centerSuppressed, co.current != nil, co.readyIndex == co.current, !scrubbing, panel == nil {
+                                        PlayerCenterControls(co: co, onInteract: flashChrome, spacing: landscape ? 72 : 44)
+                                            .position(x: landscape ? full.width / 2 : rect.midX, y: landscape ? full.height / 2 : rect.midY)
+                                            .transition(.opacity)
+                                    }
+                                    // The series title and the progress bar never auto-hide; everything else follows
+                                    // `controlsVisible`. Locked / speed modes keep them on screen but not interactive.
+                                    controls(full, ins: ins, chrome: controlsVisible && !locked, interactive: !locked && !speedMode)
+                                }
+                                if let p = panel, !locked {
+                                    popover(p, full: full, ins: ins)
+                                }
+                                if let run = seekRun {
+                                    Label("\(run.total > 0 ? "+" : "−")\(abs(run.total)) 秒", systemImage: run.total > 0 ? "forward.fill" : "backward.fill")
+                                        .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                                        .padding(.horizontal, 16).padding(.vertical, 10)
+                                        .background(.black.opacity(0.55), in: Capsule())
+                                        .position(x: run.total > 0 ? full.width * 0.75 : full.width * 0.25, y: landscape ? full.height / 2 - 70 : rect.midY - 70)
+                                        .transition(.opacity).allowsHitTesting(false)
+                                        .accessibilityIdentifier("player.seekRun")
+                                }
+                                if let osd {
+                                    Text(osd).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                                        .padding(.horizontal, 16).padding(.vertical, 10)
+                                        .background(.black.opacity(0.62), in: Capsule())
+                                        .position(x: full.width / 2, y: landscape ? full.height / 2 : rect.midY - 70)
+                                        .transition(.opacity).allowsHitTesting(false).accessibilityIdentifier("player.osd")
+                                }
+                                if let h = adjuster.hud, !speedMode {
+                                    PlayerAdjustHUD(side: h.side, value: h.value)
+                                        .position(x: full.width / 2, y: (landscape ? 24 : ins.top + 64) + 30)
+                                        .transition(.opacity).allowsHitTesting(false)
+                                }
+                                HiddenVolumeView(adjuster: adjuster).frame(width: 1, height: 1).allowsHitTesting(false)
+                                if speedMode {
+                                    PlayerSpeedHUD(rate: previewRate, pendingLock: pendingLock, pendingCancel: pendingCancel,
+                                                   hasLockedRate: co.lockedRate != nil)
+                                        .position(x: full.width / 2, y: full.height / 2).allowsHitTesting(false)
+                                }
+                            }
+                            .frame(width: full.width, height: full.height)
                         }
                     }
-                    .frame(width: full.width, height: full.height)
-                    if let sub = co.subtitleText, !co.pipActive {
-                        // Aether loopback / software routes: the host draws the selected track's cues.
-                        VStack {
-                            Spacer()
-                            Text(sub).font(.system(size: landscape ? 18 : 16, weight: .semibold)).foregroundStyle(.white)
-                                .multilineTextAlignment(.center).shadow(color: .black, radius: 2).shadow(color: .black.opacity(0.8), radius: 4)
-                                .padding(.horizontal, 24)
-                                .padding(.bottom, (landscape ? 70 : 200) + ins.bottom)
-                                .accessibilityIdentifier("player.subtitle")
-                        }
-                        .frame(width: full.width, height: full.height).allowsHitTesting(false)
-                    }
-                    if series.source == .hongguo, danmaku.enabled, !co.pipActive, !speedMode,
-                       let i = co.current, co.readyIndex == i, co.episodes.indices.contains(i) {
-                        danmakuLayer(i, full: full, ins: ins)
-                    }
-                    // Expanded controls alone need contrast scrims. Compact always-on chrome is transparent.
-                    if !co.pipActive, controlsVisible && !locked {
-                        gradients(full)
-                    }
-                    if panel != nil {
-                        Color.black.opacity(0.5).frame(width: full.width, height: full.height)
-                            .contentShape(Rectangle()).onTapGesture { closePanel() }
-                            .accessibilityIdentifier("player.scrim")
-                    }
-                    if co.pipActive {
-                        Button { co.togglePiP() } label: {
-                            Label("返回播放器", systemImage: "pip.exit")
-                                .padding(.horizontal, 20).padding(.vertical, 12)
-                                .background(STVTheme.surface, in: Capsule())
-                        }
-                        .foregroundStyle(.white)
-                        .position(x: full.width / 2, y: full.height / 2)
-                    } else {
-                        if locked {
-                            if controlsVisible { lockOnly(full, ins: ins).transition(.opacity) }
-                        } else if controlsVisible, !centerSuppressed, co.current != nil, co.readyIndex == co.current, !scrubbing, panel == nil {
-                            PlayerCenterControls(co: co, onInteract: flashChrome, spacing: landscape ? 72 : 44)
-                                .position(x: landscape ? full.width / 2 : rect.midX, y: landscape ? full.height / 2 : rect.midY)
-                                .transition(.opacity)
-                        }
-                        // The series title and the progress bar never auto-hide; everything else follows
-                        // `controlsVisible`. Locked / speed modes keep them on screen but not interactive.
-                        controls(full, ins: ins, chrome: controlsVisible && !locked, interactive: !locked && !speedMode)
-                    }
-                    if let p = panel, !locked {
-                        popover(p, full: full, ins: ins)
-                    }
-                    if let run = seekRun {
-                        Label("\(run.total > 0 ? "+" : "−")\(abs(run.total)) 秒", systemImage: run.total > 0 ? "forward.fill" : "backward.fill")
-                            .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
-                            .padding(.horizontal, 16).padding(.vertical, 10)
-                            .background(.black.opacity(0.55), in: Capsule())
-                            .position(x: run.total > 0 ? full.width * 0.75 : full.width * 0.25, y: landscape ? full.height / 2 - 70 : rect.midY - 70)
-                            .transition(.opacity).allowsHitTesting(false)
-                            .accessibilityIdentifier("player.seekRun")
-                    }
-                    if let osd {
-                        Text(osd).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
-                            .padding(.horizontal, 16).padding(.vertical, 10)
-                            .background(.black.opacity(0.62), in: Capsule())
-                            .position(x: full.width / 2, y: landscape ? full.height / 2 : rect.midY - 70)
-                            .transition(.opacity).allowsHitTesting(false).accessibilityIdentifier("player.osd")
-                    }
-                    if let h = adjuster.hud, !speedMode {
-                        PlayerAdjustHUD(side: h.side, value: h.value)
-                            .position(x: full.width / 2, y: (landscape ? 24 : ins.top + 64) + 30)
-                            .transition(.opacity).allowsHitTesting(false)
-                    }
-                    HiddenVolumeView(adjuster: adjuster).frame(width: 1, height: 1).allowsHitTesting(false)
-                    if speedMode {
-                        PlayerSpeedHUD(rate: previewRate, pendingLock: pendingLock, pendingCancel: pendingCancel,
-                                       hasLockedRate: co.lockedRate != nil)
-                            .position(x: full.width / 2, y: full.height / 2).allowsHitTesting(false)
-                    }
-                    if canShowPadSplit && !padDrawerOpen && controlsVisible {
-                        Button { withAnimation(.compatSnappy) { padDrawerOpen = true } } label: {
-                            Text("展开选集")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 14).padding(.vertical, 8)
-                                .background(Color(red: 0.08, green: 0.09, blue: 0.12).opacity(0.75), in: Capsule())
-                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                        .position(x: full.width - 58 - ins.trailing, y: ins.top + 32)
-                    }
+                    .ignoresSafeArea()
                 }
-                .frame(width: full.width, height: full.height)
             }
-            .ignoresSafeArea()
-        }
-        if canShowPadSplit && padDrawerOpen {
-            padSplitDrawer
-                .frame(width: 340)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-        }
-        }
-        .background(Color.black.ignoresSafeArea())
-        .background(InteractivePopEnabler())
-        .toolbar(.hidden, for: .navigationBar)
-        .toolbar(.hidden, for: .tabBar)
-        .statusBarHidden(landscape)
-        .preferredColorScheme(.dark)
-        .persistentSystemOverlays(.hidden)
-        .animation(.easeOut(duration: 0.18), value: panel)
-        .task {
-            // Portrait by default for everything (landscape videos play centred). Rotating the phone (when
-            // the system rotation lock is off) or the 横屏 button switches to landscape.
-            OrientationGate.unlock()
-            co.start()
-            if co.current == nil { await load() }
-        }
-        .task { await screenshotHooks() }
-        .task(id: lastInteraction) {
-            do { try await Task.sleep(for: .seconds(3)) } catch { return }
-            guard !noAutoHide, !co.paused || locked else { return }
-            withAnimation(.easeOut(duration: 0.2)) { showChrome = false }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
-            co.didEnterBackground()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            co.didBecomeActive()
-            flashChrome()
-        }
-        .alert("画中画暂不可用", isPresented: Binding(get: { co.pipError != nil }, set: { if !$0 { co.pipError = nil } })) {
-            Button("好") { co.pipError = nil }
-        } message: { Text(co.pipError ?? "") }
-        .onAppear { OrientationGate.unlock() }
-        .onDisappear { co.teardown(); adjuster.restoreBrightness(); OrientationGate.lockPortrait() }
-        .compatOnChange(of: co.current) { new in
-            scrubbing = false
-            if new != nil { flashChrome(); centerSuppressed = true } else { flashChrome() }
-        }
-        .compatOnChange(of: co.readyIndex) { index in
-            guard index != nil else { return }
-            if centerSuppressed { showChrome = true; rearmAutoHide() } else { flashChrome() }
-        }
-        
-        .compatOnChange(of: landscape) { l in if !l { locked = false }; panel = nil }
-        .sheet(item: $verifyTarget) { t in SiteVerifySheet(target: t) { if let c = co.current { co.activate(c) } } }
-        .sheet(isPresented: $danmakuSheet, onDismiss: flashChrome) {
-            DanmakuSettingsSheet(available: series.source == .hongguo)
-                .presentationDragIndicator(.visible).compatPresentationBackground(STVTheme.surface)
+            .background(Color.black.ignoresSafeArea())
+            .background(InteractivePopEnabler())
+            .toolbar(.hidden, for: .navigationBar)
+            .toolbar(.hidden, for: .tabBar)
+            .statusBarHidden(landscape)
+            .preferredColorScheme(.dark)
+            .persistentSystemOverlays(.hidden)
+            .animation(.easeOut(duration: 0.18), value: panel)
+            .task {
+                // Portrait by default for everything (landscape videos play centred). Rotating the phone (when
+                // the system rotation lock is off) or the 横屏 button switches to landscape.
+                OrientationGate.unlock()
+                co.start()
+                if co.current == nil { await load() }
+            }
+            .task { await screenshotHooks() }
+            .task(id: lastInteraction) {
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                guard !noAutoHide, !co.paused || locked else { return }
+                withAnimation(.easeOut(duration: 0.2)) { showChrome = false }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+                co.didEnterBackground()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                co.didBecomeActive()
+                flashChrome()
+            }
+            .alert("画中画暂不可用", isPresented: Binding(get: { co.pipError != nil }, set: { if !$0 { co.pipError = nil } })) {
+                Button("好") { co.pipError = nil }
+            } message: { Text(co.pipError ?? "") }
+            .onAppear { OrientationGate.unlock() }
+            .onDisappear { co.teardown(); adjuster.restoreBrightness(); OrientationGate.lockPortrait() }
+            .onChangeCompat(of: co.current) { old, _ in
+                scrubbing = false
+                if old != nil { flashChrome(); centerSuppressed = true } else { flashChrome() }
+            }
+            .onChangeCompat(of: co.readyIndex) { _, index in
+                guard index != nil else { return }
+                if centerSuppressed { showChrome = true; rearmAutoHide() } else { flashChrome() }
+            }
+
+            .onChangeCompat(of: landscape) { _, l in if !l { locked = false }; panel = nil }
+            .sheet(item: $verifyTarget) { t in WithPerceptionTracking {
+                SiteVerifySheet(target: t) { if let c = co.current { co.activate(c) } }
+            } }
+            .sheet(isPresented: $danmakuSheet, onDismiss: flashChrome) {
+                WithPerceptionTracking {
+                    DanmakuSettingsSheet(available: series.source == .hongguo)
+                        .presentationDragIndicator(.visible).presentationBackgroundCompat(STVTheme.surface)
+                }
+            }
         }
     }
 
@@ -311,123 +298,24 @@ struct PlayerScreen: View {
 
     // MARK: Episode feed
 
-    @ViewBuilder
     private var episodeFeed: some View {
-        let isScrollDisabled = locked || speedMode || scrubbing || co.pipActive || panel != nil
-        if #available(iOS 18.0, *) {
-            ScrollView(.vertical) {
-                LazyVStack(spacing: 0) {
-                    ForEach(co.episodes.indices, id: \.self) { i in
-                        stage(i).containerRelativeFrame([.horizontal, .vertical]).id(i)
-                    }
-                }.scrollTargetLayout()
-            }
-            .scrollTargetBehavior(.paging)
-            .scrollIndicators(.hidden)
-            .scrollPosition(id: Binding(get: { co.current }, set: { co.select($0) }), anchor: .center)
-            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, y in feedScrollY = y }
-            .compatSelectionFeedback(trigger: co.current)
-            .compatOnChange(of: co.readyIndex) { releaseHeldIfSettled() }
-            .onScrollPhaseChange { _, phase in feedSettled = phase == .idle; releaseHeldIfSettled() }
-            .accessibilityIdentifier("player.feed")
-            .accessibilityValue(feedSettled ? "idle" : "scrolling")
-            .compatOnChange(of: co.current) { new in
-                if let new, co.episodes.indices.contains(new) { showOSD("第\(co.episodes[new].ep)集") }
-            }
-            .scrollDisabled(isScrollDisabled)
-        } else {
-            GeometryReader { geo in
-                let pageH = max(1, geo.size.height)
-                ZStack {
-                    if let cur = co.current, co.episodes.indices.contains(cur) {
-                        stage(cur)
-                            .frame(width: geo.size.width, height: pageH)
-                    }
-                }
-                .contentShape(Rectangle())
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 24)
-                        .onChanged { val in
-                            guard !isScrollDisabled, abs(val.translation.height) > abs(val.translation.width) else { return }
-                            feedSettled = false
-                            feedScrollY = CGFloat(co.current ?? 0) * pageH - val.translation.height
-                        }
-                        .onEnded { val in
-                            guard !isScrollDisabled else { return }
-                            let cur = co.current ?? 0
-                            let threshold = min(90, pageH * 0.18)
-                            var next = cur
-                            if val.translation.height < -threshold, cur + 1 < co.episodes.count {
-                                next = cur + 1
-                            } else if val.translation.height > threshold, cur > 0 {
-                                next = cur - 1
-                            }
-                            if next != cur { co.select(next) }
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
-                                feedScrollY = CGFloat(next) * pageH
-                            }
-                            feedSettled = true
-                            releaseHeldIfSettled()
-                        }
-                )
-                .compatOnChange(of: co.current) { new in
-                    if let new {
-                        feedScrollY = CGFloat(new) * pageH
-                        if co.episodes.indices.contains(new) { showOSD("第\(co.episodes[new].ep)集") }
-                    }
-                }
-                .compatOnChange(of: co.readyIndex) { releaseHeldIfSettled() }
-                .compatSelectionFeedback(trigger: co.current)
-                .accessibilityIdentifier("player.feed")
-                .accessibilityValue(feedSettled ? "idle" : "scrolling")
-            }
+        EpisodePager(count: co.episodes.count, selection: co.current ?? 0,
+                     enabled: !(locked || speedMode || scrubbing || co.pipActive || panel != nil),
+                     revision: "\(locked)-\(speedMode)-\(scrubbing)-\(co.pipActive)-\(panel != nil)-\(landscape)-\(co.readyIndex ?? -1)",
+                     onSelect: { index in
+                         co.select(index)
+                         UISelectionFeedbackGenerator().selectionChanged()
+                     },
+                     onOffset: { feedScrollY = $0 },
+                     onSettled: { feedSettled = $0; releaseHeldIfSettled() }) { index in
+            WithPerceptionTracking { stage(index) }
         }
-    }
-
-    /// Right-hand persistent drawer for 9:16 short dramas on landscape iPad (Design 03).
-    private var padSplitDrawer: some View {
-        let ranges = EpisodeGroups.ranges(total: co.episodes.count)
-        let curIdx = co.current ?? 0
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(co.detail?.title ?? series.title)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                Spacer()
-                Button { withAnimation(.compatSnappy) { padDrawerOpen = false } } label: {
-                    Text("收起")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(STVTheme.accent)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(STVTheme.accentSoft, in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-            EpisodePickerSheet(episodes: co.episodes, ranges: ranges, current: curIdx) { i in
-                co.select(i)
-            }
-            .frame(maxHeight: .infinity)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("当前解码与音轨")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
-                let parts = [co.tech?.resolution, co.tech?.hdr == true ? "HDR / DV" : nil, co.tech?.codec, co.tech?.audio]
-                    .compactMap { $0 }.filter { !$0.isEmpty }
-                Text(parts.isEmpty ? "MPVKit (DV / DTS) 就绪" : parts.joined(separator: " · "))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(STVTheme.accent)
-                    .lineLimit(2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
+        .onChangeCompat(of: co.readyIndex) { _, _ in releaseHeldIfSettled() }
+        .accessibilityIdentifier("player.feed")
+        .accessibilityValue(feedSettled ? "idle" : "scrolling")
+        .onChangeCompat(of: co.current) { old, new in
+            if old != nil, let new, co.episodes.indices.contains(new) { showOSD("第\(co.episodes[new].ep)集") }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 18)
-        .background(Color(red: 0.082, green: 0.094, blue: 0.122).ignoresSafeArea())
-        .overlay(alignment: .leading) { Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1) }
     }
 
     /// Drop the previous episode's still once the new one is playing and the page has stopped moving.
@@ -519,9 +407,11 @@ struct PlayerScreen: View {
                 .accessibilityIdentifier("player.compactTitle")
             Spacer(minLength: 0)
             GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    Color.white.opacity(0.18)
-                    Color.white.opacity(0.6).frame(width: g.size.width * max(0, min(1, co.duration > 0 ? co.time / co.duration : 0)))
+                WithPerceptionTracking {
+                    ZStack(alignment: .leading) {
+                        Color.white.opacity(0.18)
+                        Color.white.opacity(0.6).frame(width: g.size.width * max(0, min(1, co.duration > 0 ? co.time / co.duration : 0)))
+                    }
                 }
             }
             .frame(height: 2)
@@ -539,10 +429,10 @@ struct PlayerScreen: View {
                 PlayerIconButton(symbol: "pip.enter", label: "画中画") { co.togglePiP() }
                     .disabled(!co.pipPossible).opacity(co.pipPossible ? 1 : 0.55)
                     .accessibilityIdentifier("player.pip")
-                if suppliedDetail == nil { PlayerIconButton(symbol: library.isFavorite(series) ? "heart.fill" : "heart",
+                PlayerIconButton(symbol: library.isFavorite(series) ? "heart.fill" : "heart",
                                  label: library.isFavorite(series) ? "取消收藏" : "收藏") {
                     library.toggleFavorite(series); flashChrome()
-                } }
+                }
                 moreMenu
             }
             .padding(.horizontal, 16).padding(.top, ins.top)
@@ -660,7 +550,6 @@ struct PlayerScreen: View {
 
     private func landSubline(_ i: Int) -> String {
         let e = co.episodes[i]
-        if suppliedDetail != nil { return "第 \(e.ep) 章 · " + e.title }
         if longForm {
             return co.episodes.count > 1 ? "S1:E\(e.ep)" + (e.title.isEmpty ? "" : " · " + e.title) : (series.subtitle ?? Fmt.meta(series))
         }
@@ -694,8 +583,8 @@ struct PlayerScreen: View {
 
     private var moreMenu: some View {
         Menu {
-            Toggle(isOn: $showTech) { Label("技术信息", systemImage: "info.circle") }
-            Toggle(isOn: Binding(get: { co.autoNext }, set: { co.autoNext = $0 })) { Label("自动连播", systemImage: "repeat") }
+            Toggle(isOn: $showTech.withSwitchFeedback()) { Label("技术信息", systemImage: "info.circle") }
+            Toggle(isOn: Binding(get: { co.autoNext }, set: { co.autoNext = $0 }).withSwitchFeedback()) { Label("自动连播", systemImage: "repeat") }
             Button { fillScreen.toggle(); showOSD(fillScreen ? "画面：铺满全屏" : "画面：完整自适应") } label: {
                 Label(fillScreen ? "完整自适应" : "铺满全屏", systemImage: fillScreen ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
             }
@@ -752,9 +641,7 @@ struct PlayerScreen: View {
         let e = co.episodes[i]
         let longList = longForm
         let line: String, strong: String, rest: String
-        if suppliedDetail != nil {
-            line = ""; strong = "第\(e.ep)章"; rest = " · " + e.title
-        } else if longList {
+        if longList {
             if co.episodes.count > 1 { line = ""; strong = "S1:E\(e.ep)"; rest = e.title.isEmpty ? "" : " · " + e.title }
             else { line = series.subtitle ?? Fmt.meta(series); strong = ""; rest = "" }
         } else {
@@ -1092,8 +979,7 @@ struct PlayerScreen: View {
 
     private func load() async {
         do {
-            let d: HGSeriesDetail
-            if let suppliedDetail { d = suppliedDetail } else { d = try await Catalog.detail(series) }
+            let d = try await Catalog.detail(series)
             try Task.checkCancellation()
             loadError = nil
             guard !d.episodes.isEmpty else { throw ProviderError.upstream("暂无可播放分集") }
@@ -1101,7 +987,7 @@ struct PlayerScreen: View {
             co.detail = d
             co.select(start)
             flashChrome()
-            if suppliedDetail == nil { seasons = await SeasonStore.seasons(for: d, series: series) }
+            seasons = await SeasonStore.seasons(for: d, series: series)
         } catch { if !Task.isCancelled { loadError = error } }
     }
 
@@ -1143,44 +1029,51 @@ struct EpisodePickerSheet: View {
     let ranges: [EpisodeRange]
     let current: Int
     let onPick: (Int) -> Void
-    @Environment(\.layoutMetrics) private var layout
     @State private var group = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("选集 · 共\(episodes.count)集").font(.headline).padding(.top, 18).padding(.horizontal, 20)
-            if ranges.count > 1 {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(ranges.indices, id: \.self) { i in
-                            let on = i == group
-                            Button { withAnimation(.compatSnappy) { group = i } } label: {
-                                Text(EpisodeGroups.label(ranges[i], episodes: episodes))
-                                    .font(.subheadline.weight(on ? .semibold : .regular))
-                                    .padding(.horizontal, 14).padding(.vertical, 7)
-                                    .background(on ? Color.white.opacity(0.18) : Color.white.opacity(0.06), in: Capsule())
-                                    .foregroundStyle(.white)
-                            }.buttonStyle(.plain)
+        WithPerceptionTracking {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("选集 · 共\(episodes.count)集").font(.headline).padding(.top, 18).padding(.horizontal, 20)
+                if ranges.count > 1 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(ranges.indices, id: \.self) { i in
+                                WithPerceptionTracking {
+                                    let on = i == group
+                                    Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { group = i } } label: {
+                                        Text(EpisodeGroups.label(ranges[i], episodes: episodes))
+                                            .font(.subheadline.weight(on ? .semibold : .regular))
+                                            .padding(.horizontal, 14).padding(.vertical, 7)
+                                            .background(on ? Color.white.opacity(0.18) : Color.white.opacity(0.06), in: Capsule())
+                                            .foregroundStyle(.white)
+                                    }.buttonStyle(.plain)
+                                }
+                            }
+                        }.padding(.horizontal, 20)
+                    }
+                }
+                let r = ranges.indices.contains(group) ? ranges[group] : EpisodeRange(0, max(0, episodes.count - 1))
+                ScrollView {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+                        WithPerceptionTracking {
+                            ForEach(r.start...r.end, id: \.self) { i in
+                                WithPerceptionTracking {
+                                    Button { onPick(i) } label: {
+                                        Text("\(episodes[i].ep)").font(.subheadline.weight(.semibold))
+                                            .frame(maxWidth: .infinity, minHeight: 42)
+                                            .background(current == i ? STVTheme.accent.opacity(0.17) : STVTheme.glass, in: RoundedRectangle(cornerRadius: 10))
+                                            .foregroundStyle(current == i ? STVTheme.accent : STVTheme.text)
+                                    }.buttonStyle(.plain)
+                                }
+                            }
                         }
                     }.padding(.horizontal, 20)
                 }
             }
-            let r = ranges.indices.contains(group) ? ranges[group] : EpisodeRange(0, max(0, episodes.count - 1))
-            ScrollView {
-                LazyVGrid(columns: layout.episodeGridItems(spacing: 8), spacing: 8) {
-                    ForEach(r.start...r.end, id: \.self) { i in
-                        Button { onPick(i) } label: {
-                            Text("\(episodes[i].ep)").font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity, minHeight: 42)
-                                .background(current == i ? STVTheme.accent.opacity(0.17) : STVTheme.glass, in: RoundedRectangle(cornerRadius: 10))
-                                .foregroundStyle(current == i ? STVTheme.accent : STVTheme.text)
-                        }.buttonStyle(.plain)
-                    }
-                }.padding(.horizontal, 20)
+            .onAppear {
+                if let i = ranges.firstIndex(where: { current >= $0.start && current <= $0.end }) { group = i }
             }
-        }
-        .onAppear {
-            if let i = ranges.firstIndex(where: { current >= $0.start && current <= $0.end }) { group = i }
         }
     }
 }
@@ -1188,19 +1081,20 @@ struct EpisodePickerSheet: View {
 struct PosterBackdrop: View {
     let url: String
     var body: some View {
-        CoverView(url: url, corner: 0)
-            .overlay(LinearGradient(colors: [.black.opacity(0.38), .black.opacity(0.7)],
-                                    startPoint: .top, endPoint: .bottom))
-        .ignoresSafeArea()
+        WithPerceptionTracking {
+            CoverView(url: url, corner: 0)
+                .overlay(LinearGradient(colors: [.black.opacity(0.38), .black.opacity(0.7)],
+                                        startPoint: .top, endPoint: .bottom))
+            .ignoresSafeArea()
+        }
     }
 }
 
-/// Hosts the active core's video surface (AetherPlayerView or an AVPlayerLayer view); swapped when an
-/// episode falls back from AetherEngine to AVPlayer.
+/// Hosts the AVPlayerLayer surface used by inline playback and picture in picture.
 struct PlayerLayerView: UIViewRepresentable {
     let coordinator: PlaybackCoordinator
     var fill: Bool = false
-    var engine: PlayerEngineKind = .mpv
+    var engine: PlayerEngineKind = .avplayer
 
     func makeUIView(context: Context) -> PlayerRenderHost {
         let view = PlayerRenderHost()
@@ -1524,6 +1418,8 @@ private struct ChromeFade: ViewModifier {
     let on: Bool
     var keepAccessible = false
     func body(content: Content) -> some View {
-        content.opacity(on ? 1 : 0).allowsHitTesting(on).accessibilityHidden(!on && !keepAccessible)
+        WithPerceptionTracking {
+            content.opacity(on ? 1 : 0).allowsHitTesting(on).accessibilityHidden(!on && !keepAccessible)
+        }
     }
 }

@@ -149,16 +149,4 @@ import XCTest
         XCTAssertEqual(NovelStore.shared.cachedCount(book), 3)
         XCTAssertEqual(loader.downloadStates[book.id]?.failures, 0)
     }
-    func testCachedTOCRestoresChapterIndexAndNextChapterScriptBindings()async throws{
-        let source=LegadoSource(bookSourceUrl:"https://index.test/"+UUID().uuidString,bookSourceName:"index",searchUrl:"/s",ruleContent:["content":"@js:chapter.getIndex()+':'+chapter.getTitle()+':'+nextChapterUrl"])
-        LegadoSourceStore.shared.add([source])
-        let item=LegadoSearchItem(name:"index fixture",author:"",kind:"",intro:"",cover:"",latest:"",bookURL:source.id+"/book",sourceURL:source.id,sourceName:"index")
-        let toc=(0..<3).map{LegadoChapter(title:"chapter\($0)",url:source.id+"/\($0)")}
-        let store=NovelStore.shared;let book=store.addWeb(item,info:nil,toc:toc)
-        defer{LegadoHTTP.transport=nil;store.remove(book);LegadoSourceStore.shared.remove([source.id])}
-        LegadoHTTP.transport={req in (Data("<body>fixture</body>".utf8),HTTPURLResponse(url:req.url!,statusCode:200,httpVersion:nil,headerFields:nil)!)}
-        try await NovelWebLoader.shared.load(book,1)
-        XCTAssertEqual(store.chapterText(book,1),"chapter1\n1:chapter1:"+toc[2].url)
-    }
-
 }

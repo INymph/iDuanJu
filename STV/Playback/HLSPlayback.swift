@@ -30,12 +30,14 @@ final class HLSPlayback: NSObject, AVAssetResourceLoaderDelegate {
     func resourceLoader(_ loader: AVAssetResourceLoader, shouldWaitForLoadingOfRequestedResource req: AVAssetResourceLoadingRequest) -> Bool {
         guard let url = req.request.url, let scheme = url.scheme else { return false }
         if scheme == Self.keyScheme {
-            guard let key = Bytes.fromHex(keyHex), key.count == 16 else { req.finishLoading(with: URLError(.userAuthenticationRequired)); return true }
-            req.contentInformationRequest?.contentType = "public.data"
-            req.contentInformationRequest?.contentLength = 16
-            req.contentInformationRequest?.isByteRangeAccessSupported = false
-            req.dataRequest?.respond(with: Data(key))
-            req.finishLoading()
+            queue.async { [self] in
+                guard !req.isCancelled, !req.isFinished else { return }
+                guard let key = Bytes.fromHex(keyHex), key.count == 16 else {
+                    req.finishLoading(with: URLError(.userAuthenticationRequired))
+                    return
+                }
+                Self.complete(req, bytes: Data(key), type: "public.data")
+            }
             return true
         }
         guard scheme.hasPrefix(Self.plScheme), var c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
@@ -43,17 +45,38 @@ final class HLSPlayback: NSObject, AVAssetResourceLoaderDelegate {
         guard let real = c.url else { return false }
         var r = URLRequest(url: real)
         for (k, v) in headers { r.setValue(v, forHTTPHeaderField: k) }
-        session.dataTask(with: r) { [weak self] data, resp, err in
-            guard let self, let data, err == nil, (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false else {
-                req.finishLoading(with: err ?? URLError(.badServerResponse)); return
+        session.dataTask(with: r) { [self] data, resp, err in
+            queue.async { [self] in
+                guard !req.isCancelled, !req.isFinished else { return }
+                guard let data, err == nil, let http = resp as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode) else {
+                    req.finishLoading(with: err ?? URLError(.badServerResponse))
+                    return
+                }
+                let text = rewrite(HLSAdFilter.apply(String(decoding: data, as: UTF8.self), base: real), base: real)
+                Self.complete(req, bytes: Data(text.utf8), type: "public.m3u-playlist")
             }
-            let text = self.rewrite(HLSAdFilter.apply(String(decoding: data, as: UTF8.self), base: real), base: real)
-            req.contentInformationRequest?.contentType = "public.m3u-playlist"
-            req.contentInformationRequest?.contentLength = Int64(text.utf8.count)
-            req.dataRequest?.respond(with: Data(text.utf8))
-            req.finishLoading()
         }.resume()
         return true
+    }
+
+    private static func complete(_ req: AVAssetResourceLoadingRequest, bytes: Data, type: String) {
+        req.contentInformationRequest?.contentType = type
+        req.contentInformationRequest?.contentLength = Int64(bytes.count)
+        req.contentInformationRequest?.isByteRangeAccessSupported = true
+        if let request = req.dataRequest {
+            let offset = request.currentOffset
+            guard offset >= 0, offset <= Int64(bytes.count), request.requestedOffset >= 0,
+                  request.requestedOffset <= offset, request.requestedLength >= 0 else {
+                req.finishLoading(with: URLError(.badServerResponse))
+                return
+            }
+            let start = Int(offset)
+            let remaining = max(0, Int64(request.requestedLength) - (offset - request.requestedOffset))
+            let length = request.requestsAllDataToEndOfResource ? bytes.count - start : min(bytes.count - start, Int(remaining))
+            if length > 0 { request.respond(with: bytes.subdata(in: start..<(start + length))) }
+        }
+        req.finishLoading()
     }
 
     /// Absolutize URIs; nested playlists go back through the loader, keys go to the local key scheme.

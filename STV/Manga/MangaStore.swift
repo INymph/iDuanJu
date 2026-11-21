@@ -1,5 +1,5 @@
 import Foundation
-import Combine
+import Perception
 
 struct MangaProgress: Codable, Hashable {
     var item: MangaItem
@@ -23,13 +23,13 @@ struct MangaOffline: Codable, Hashable {
 }
 
 /// Favorites, reading progress and offline chapters (local only).
-@MainActor
-final class MangaStore: ObservableObject {
+@MainActor @Perceptible
+final class MangaStore {
     static let shared = MangaStore()
-    @Published private(set) var favorites: [MangaItem] = []
-    @Published private(set) var progress: [String: MangaProgress] = [:]
-    @Published private(set) var offline: [String: MangaOffline] = [:]
-    private var tasks: [String: Task<Void, Never>] = [:]
+    private(set) var favorites: [MangaItem] = []
+    private(set) var progress: [String: MangaProgress] = [:]
+    private(set) var offline: [String: MangaOffline] = [:]
+    @PerceptionIgnored private var tasks: [String: Task<Void, Never>] = [:]
     private let d = UserDefaults.standard
 
     private init() {

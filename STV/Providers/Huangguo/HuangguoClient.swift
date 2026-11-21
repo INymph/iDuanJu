@@ -122,13 +122,6 @@ actor HuangguoClient {
         return out
     }
 
-    /// A publication/landing page can contain player CSS/links but has no working catalog API.
-    static func isAICatalogResponse(status: Int, data: Data) -> Bool {
-        guard status == 200, let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let payload = root["data"] as? [String: Any] else { return false }
-        return payload["items"] is [Any]
-    }
-
     /// One mirror probe: GET / (redirects followed) and keep the FINAL origin so later POSTs don't hit a 301.
     private func probe(_ m: String) async -> (String, String)? {
         guard let u = URL(string: m + "/") else { return nil }
@@ -138,15 +131,7 @@ actor HuangguoClient {
         let body = String(decoding: d, as: UTF8.self)
         guard body.contains("hg-drama-card") || body.contains("videoInitialData") || body.contains("/ai-duanju/") else { return nil }
         let f = http.url ?? u
-        let base = "\(f.scheme ?? "https")://\(f.host ?? u.host ?? "")"
-        guard !Task.isCancelled, let catalog = URL(string: base + "/api/videos/category/ai-duanju?sort=hot&page=1&size=1") else { return nil }
-        var api = URLRequest(url: catalog, timeoutInterval: 8)
-        api.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-        api.setValue(base + "/", forHTTPHeaderField: "Referer")
-        guard let (json, response) = try? await session.data(for: api), let result = response as? HTTPURLResponse,
-              Self.isAICatalogResponse(status: result.statusCode, data: json), !Task.isCancelled else { return nil }
-        let final = result.url ?? catalog
-        return ("\(final.scheme ?? "https")://\(final.host ?? f.host ?? "")", body)
+        return ("\(f.scheme ?? "https")://\(f.host ?? u.host ?? "")", body)
     }
 
     /// Races all mirrors (first valid wins), remembers the winner and learns new mirrors from /go-home/.

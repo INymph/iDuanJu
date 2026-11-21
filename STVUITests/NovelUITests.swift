@@ -17,31 +17,6 @@ final class NovelUITests: XCTestCase {
         return parts.count == 2 ? (parts[0], parts[1]) : (0, 0)
     }
 
-    func testUnsupportedImportsShowHonestNativeFeedback() {
-        continueAfterFailure=false
-        app=XCUIApplication();app.launchEnvironment=["STV_HOME_TAB":"novel","STV_NOVEL_PAGE":"import"]
-        func input(_ raw:String) {
-            app.launch()
-            let field=el("import.url");XCTAssertTrue(field.waitForExistence(timeout:10))
-            field.tap();field.typeText(raw)
-            XCTAssertEqual(field.value as? String,raw)
-            field.typeText("\n")
-        }
-        input(#"{"bookSourceUrl":"https://compat-audio.invalid","bookSourceType":2,"exploreUrl":"/catalog"}"#)
-        let audio=app.descendants(matching:.any).matching(NSPredicate(format:"label CONTAINS %@","当前书源类型不支持")).firstMatch
-        let shown=audio.waitForExistence(timeout:10)
-        if !shown,let dir=ProcessInfo.processInfo.environment["STV_SHOT_DIR"] {
-            try? app.debugDescription.write(toFile:dir+"/ios-import-ui-debug.txt",atomically:true,encoding:.utf8)
-            shot("ios-import-ui-debug")
-        }
-        XCTAssertTrue(shown)
-        app.swipeUp();shot("ios-unsupported-audio-import")
-        app.terminate()
-        input(#"{"sites":[],"spider":"https://example.org/spider.jar"}"#)
-        XCTAssertTrue(app.descendants(matching:.any).matching(NSPredicate(format:"label CONTAINS %@","TVBox")).firstMatch.waitForExistence(timeout:10))
-        app.swipeUp();shot("ios-unsupported-tvbox-import")
-    }
-
     func testReadTurnPagesAndJumpChapter() {
         continueAfterFailure = false
         app = XCUIApplication()
@@ -223,11 +198,6 @@ final class NovelUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["共 3 章"].waitForExistence(timeout: 10), "目录 not loaded on the detail page")
         XCTAssertTrue(app.staticTexts["雾气笼罩的港口小城里，每个人都在等一艘船。"].exists, "intro missing")
         shot("legado_03_detail")
-        el("nav.back").tap()
-        XCTAssertTrue(hit.waitForExistence(timeout: 5), "返回应保留搜索结果")
-        XCTAssertEqual(field.value as? String, "wu")
-        hit.tap()
-        XCTAssertTrue(el("detail.read").waitForExistence(timeout: 10))
         el("detail.read").tap()
         // Reader opens on 第一章, fetched from the fake site.
         XCTAssertTrue(el("novel.page").waitForExistence(timeout: 10), "reader did not open")
@@ -308,68 +278,6 @@ final class NovelUITests: XCTestCase {
         app.launchEnvironment.removeValue(forKey: "STV_NOVEL_QUERY")
         app.launch()
         XCTAssertTrue(app.staticTexts["长夜星河"].waitForExistence(timeout: 20))
-    }
-
-    func testOptInTwoRealSourceFilterControls() throws {
-        guard let file=ProcessInfo.processInfo.environment["STV_COMPAT_COLLECTION"] else { throw XCTSkip("set STV_COMPAT_COLLECTION") }
-        continueAfterFailure=false;app=XCUIApplication()
-        app.launchEnvironment=["STV_HOME_TAB":"novel","STV_NOVEL_PAGE":"rank","STV_LEGADO_IMPORT":file]
-        app.launch()
-        func choose(_ name:String) throws {
-            let picker=el("novel.rank.source");XCTAssertTrue(picker.waitForExistence(timeout:15));picker.tap()
-            let source=try XCTUnwrap(app.buttons.matching(NSPredicate(format:"label CONTAINS %@",name)).allElementsBoundByIndex.last{$0.isHittable});source.tap()
-            XCTAssertTrue(el("novel.rank.book.0").waitForExistence(timeout:40))
-        }
-        func enabled(_ button:XCUIElement) {
-            let done=expectation(for:NSPredicate(format:"enabled == true"),evaluatedWith:button);wait(for:[done],timeout:40)
-        }
-        func action(_ value:String) {
-            if app.buttons["● "+value].firstMatch.exists { return }
-            let b=app.buttons[value].firstMatch
-            XCTAssertTrue(b.waitForExistence(timeout:10));enabled(b)
-            for _ in 0..<6 { if b.isHittable {break};el("novel.rank.controls").swipeUp() }
-            b.tap()
-            XCTAssertTrue(el("novel.rank.book.0").waitForExistence(timeout:40))
-        }
-        try choose("七猫小说")
-        let bar=app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","⚙ 筛选")).firstMatch
-        enabled(bar);if bar.label.contains("▸") {bar.tap()}
-        for value in ["完结","50-100万","按评分"] { action(value) }
-        for _ in 0..<4 {el("novel.rank.controls").swipeDown()}
-        shot("ios-real-qimao-filter-combination")
-        try choose("米读小说")
-        let channel=app.buttons.matching(NSPredicate(format:"label CONTAINS %@","⚧ 频道")).firstMatch
-        enabled(channel);channel.tap();app.buttons["女频"].firstMatch.tap()
-        let female=app.buttons.matching(NSPredicate(format:"label CONTAINS %@","⚧ 频道：女频")).firstMatch
-        XCTAssertTrue(female.waitForExistence(timeout:15));enabled(female)
-        XCTAssertTrue(el("novel.rank.book.0").waitForExistence(timeout:40))
-        shot("ios-real-midu-female-filter")
-    }
-
-    func testOptInPublicDomainClassicNativeReader() throws {
-        guard let path = ProcessInfo.processInfo.environment["STV_COMPAT_BOOK"] else { throw XCTSkip("set STV_COMPAT_BOOK") }
-        continueAfterFailure = false
-        app = XCUIApplication()
-        app.launchEnvironment = ["STV_HOME_TAB":"novel", "STV_NOVEL_PAGE":"rank", "STV_LEGADO_IMPORT":path]
-        app.launch()
-        let picker = el("novel.rank.source")
-        XCTAssertTrue(picker.waitForExistence(timeout: 20))
-        picker.tap()
-        let source = try XCTUnwrap(app.buttons.matching(NSPredicate(format:"label CONTAINS %@", "古典文学")).allElementsBoundByIndex.last { $0.isHittable })
-        source.tap()
-        XCTAssertFalse(app.navigationBars["切换榜单来源"].waitForExistence(timeout: 1))
-        let first = el("novel.rank.book.0")
-        XCTAssertTrue(first.waitForExistence(timeout: 40))
-        shot("ios-classic-real-catalog")
-        first.tap()
-        let read = el("detail.read")
-        XCTAssertTrue(read.waitForExistence(timeout: 40))
-        let ready = expectation(for: NSPredicate(format:"enabled == true"), evaluatedWith:read)
-        wait(for:[ready],timeout:60)
-        shot("ios-classic-real-detail")
-        read.tap()
-        XCTAssertTrue(el("novel.page").waitForExistence(timeout: 60))
-        shot("ios-classic-real-reading")
     }
 
     /// Opt-in LIVE UI proof. Imports all 164 real sources, explicitly chooses 七猫 (default 猫扑 is Cloudflare-blocked).

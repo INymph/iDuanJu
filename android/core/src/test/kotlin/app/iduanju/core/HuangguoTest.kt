@@ -7,18 +7,6 @@ import org.junit.Test
 
 /** Ported from iOS CoverMappingTests / SiteParsingTests (huangguo parts) + offline crypto round trips. */
 class HuangguoTest {
-    @Test fun landingPageCannotWinMirrorRace() {
-        assertFalse(HuangguoClient.isAICatalogResponse(200,"<div class='hg-drama-card'>最新地址入口</div>"))
-        assertFalse(HuangguoClient.isAICatalogResponse(404,"""{"data":{"items":[]}}"""))
-        assertTrue(HuangguoClient.isAICatalogResponse(200,"""{"data":{"items":[]}}"""))
-        val c=HuangguoClient()
-        val good="https://00b4b.adihsppe.cc"
-        c.fixture={u->when { u.endsWith("/")->"<div class='hg-drama-card'>"
-            u=="$good/api/videos/category/ai-duanju?sort=hot&page=1&size=1"->"""{"data":{"items":[]}}"""
-            else->null }}
-        assertEquals(good,c.ensureAIBase())
-    }
-
     @Test fun covers() {
         val page = "https://00b4b.adihsppe.cc/video/1/"
         val h = """<meta property="og:image" content="https://expose.eisees.com/x.jpg"><script>{"coverSrc":"https:\/\/pic.drleao.cn\/upload_01\/upload\/20261107\/a.jpeg?auth_key=1-0-0-ab"}</script>"""

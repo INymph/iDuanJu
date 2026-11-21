@@ -1,13 +1,8 @@
 import Foundation
-import Combine
-
-enum LegadoSourceImportError: LocalizedError {
-    case unsupportedFormat(String)
-    var errorDescription:String? { if case .unsupportedFormat(let format)=self { return "暂不支持\(format)运行时；不是坏源，请勿当作文本书源导入" };return nil }
-}
+import Perception
 
 /// One 「阅读」(Legado) book source. Decoded leniently: rule values may be strings, numbers or nested JSON
-/// (we keep them as strings); unknown keys are ignored. Text (0), audio (1), video (4), and RSS route to their own supported consumption pipelines.
+/// (we keep them as strings); unknown keys are ignored. Only text sources (bookSourceType 0) are supported.
 struct LegadoSource: Codable, Hashable, Identifiable {
     var bookSourceUrl: String
     var bookSourceName: String
@@ -28,18 +23,15 @@ struct LegadoSource: Codable, Hashable, Identifiable {
     var ruleToc: [String: String]?
     var ruleContent: [String: String]?
     var customOrder: Int?
-    var rssRules: [String:String]?
-    var isRSS: Bool { rssRules != nil }
-    var isMedia: Bool { !isRSS && [1,4].contains(bookSourceType ?? 0) }
 
     var id: String { bookSourceUrl }
     var isOn: Bool { enabled ?? true }
     var hasLogin: Bool { !(loginUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    var supported: Bool { !bookSourceUrl.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && (isRSS || ([0,1,4].contains(bookSourceType ?? 0) && (!(searchUrl ?? "").isEmpty || !(exploreUrl ?? "").isEmpty))) }
+    var supported: Bool { (bookSourceType ?? 0) == 0 && (!(searchUrl ?? "").isEmpty || !(exploreUrl ?? "").isEmpty) }
 
     enum CodingKeys: String, CodingKey {
         case bookSourceUrl, bookSourceName, bookSourceGroup, bookSourceType, bookSourceComment, enabled, header, searchUrl,
-        exploreUrl, loginUrl, loginUi, jsLib, loginCheckJs, ruleSearch, ruleExplore, ruleBookInfo, ruleToc, ruleContent, customOrder, rssRules
+        exploreUrl, loginUrl, loginUi, jsLib, loginCheckJs, ruleSearch, ruleExplore, ruleBookInfo, ruleToc, ruleContent, customOrder
     }
 
     init(bookSourceUrl: String, bookSourceName: String, searchUrl: String?, ruleSearch: [String: String]? = nil,
@@ -79,7 +71,6 @@ struct LegadoSource: Codable, Hashable, Identifiable {
         ruleToc = Self.rules(c, .ruleToc)
         ruleContent = Self.rules(c, .ruleContent)
         customOrder = try? c.decode(Int.self, forKey: .customOrder)
-        rssRules = Self.rules(c, .rssRules)
     }
 
     private static func str(_ c: KeyedDecodingContainer<CodingKeys>, _ k: CodingKeys) -> String? {
@@ -118,10 +109,10 @@ struct LegadoAny: Codable, Hashable {
 }
 
 /// Installed book sources (Application Support/NovelSources.json).
-@MainActor
-final class LegadoSourceStore: ObservableObject {
+@MainActor @Perceptible
+final class LegadoSourceStore {
     static let shared = LegadoSourceStore()
-    @Published private(set) var sources: [LegadoSource] = []
+    private(set) var sources: [LegadoSource] = []
 
     nonisolated static var file: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("NovelSources.json")
@@ -138,18 +129,8 @@ final class LegadoSourceStore: ObservableObject {
     nonisolated static func parse(_ data: Data) throws -> [LegadoSource] {
         let trimmed = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         let d = Data(trimmed.utf8)
-        let object = try JSONSerialization.jsonObject(with:d)
-        let rows = (object as? [Any])?.compactMap{$0 as? [String:Any]} ?? (object as? [String:Any]).map{[$0]} ?? []
-        if rows.contains(where:{$0["sites"] != nil || $0["spider"] != nil || $0["lives"] != nil}) { throw LegadoSourceImportError.unsupportedFormat(" TVBox ") }
-        let normalized = rows.map { row -> [String:Any] in
-            guard let url = row["sourceUrl"] as? String, row["bookSourceUrl"] == nil || row["ruleArticles"] != nil || row["sortUrl"] != nil else { return row }
-            var out = row
-            out["bookSourceUrl"] = url; out["bookSourceName"] = row["sourceName"] as? String ?? url
-            out["rssRules"] = row
-            return out
-        }
-        let normalizedData = try JSONSerialization.data(withJSONObject: normalized)
-        return try JSONDecoder().decode([LossyItem].self, from: normalizedData).compactMap(\.value)
+        if trimmed.hasPrefix("[") { return try JSONDecoder().decode([LossyItem].self, from: d).compactMap(\.value) }
+        return [try JSONDecoder().decode(LegadoSource.self, from: d)]
     }
 
     private struct LossyItem: Decodable {

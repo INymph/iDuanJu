@@ -49,7 +49,7 @@ fun LibraryListScreen(kind: String, onBack: () -> Unit, onOpenDetail: (String) -
         if (fav) {
             val items = lib.favorites.entries.sortedByDescending { it.value.third }
             if (items.isEmpty()) Empty("还没有收藏")
-            else LazyVerticalGrid(GridCells.Fixed(app.iduanju.ui.components.LocalLayoutMetrics.current.posterCols), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            else LazyVerticalGrid(GridCells.Fixed(3), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 items(items, key = { it.key }) { (sid, v) ->
                     Column(Modifier.clickable { onOpenDetail(sid) }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Box(Modifier.fillMaxWidth().aspectRatio(0.75f).clip(RoundedCornerShape(10.dp)).background(c.elevated)) {

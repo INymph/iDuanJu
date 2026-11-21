@@ -6,11 +6,12 @@ final class RankUITests: XCTestCase {
         app.launchEnvironment["NOVEL_PREVIEW"] = "1"
         app.launchEnvironment["NOVEL_ROUTE"] = "search"
         app.launch()
-        XCTAssertTrue(app.staticTexts["搜书"].waitForExistence(timeout:10))
+        XCTAssertTrue(app.navigationBars["小说搜索"].waitForExistence(timeout:10))
         app.buttons["search.sources"].tap()
-        XCTAssertTrue(app.buttons["sources.add"].waitForExistence(timeout:10))
-        app.buttons["nav.back"].tap()
-        let query = app.textFields["search.field"]
+        XCTAssertTrue(app.navigationBars["书源配置"].waitForExistence(timeout:10))
+        XCTAssertTrue(app.buttons["sources.add"].exists)
+        app.navigationBars["书源配置"].buttons["返回"].tap()
+        let query = app.searchFields.firstMatch
         XCTAssertTrue(query.waitForExistence(timeout:5))
         query.tap(); query.typeText("雾港\n")
         XCTAssertTrue(app.buttons["search.result.雾港"].waitForExistence(timeout:15))

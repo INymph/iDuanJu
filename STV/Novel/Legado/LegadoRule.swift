@@ -64,8 +64,6 @@ final class LegadoContext {
     /// Raw body of the page being parsed (Legado's JS `src`).
     var src: String?
     var chapter: [String: Any]?
-    var nextChapterURL:String?
-    var rssArticle:[String:Any]?
     var key: String?
     var page: Int?
     var log: [String] = []
@@ -262,21 +260,13 @@ final class LegadoContext {
         // Legado's `src` is the analyzer content: the item for item rules, the raw body for page rules.
         if let cur = stack.last { b["src"] = LegadoAnalyzer.jsonable(cur.content) } else if let src { b["src"] = src }
         var code = code
-        // Upstream JSONPath JSON containers stringify as JSON, while keeping property access.
-        let isNodeList=(result as? [Any]).map{ !$0.isEmpty && $0.allSatisfy{$0 is LegadoNode} } ?? false
-        if result is [String:Any] || ((result is [Any]) && !isNodeList) {
-            code = "if(result && typeof result==='object' && !Object.prototype.hasOwnProperty.call(result,'toString')){Object.defineProperty(result,'toString',{value:function(){return JSON.stringify(this)},enumerable:false,configurable:true})};\n" + code
-        }
         if let list = result as? [Any], !list.isEmpty, list.allSatisfy({ $0 is LegadoNode }) {
             b["__resultNodes"] = list.map { handle($0 as! LegadoNode) }
             code = "result = __nodeList(__resultNodes);\n" + code
         }
         if let key { b["key"] = key }
         if let page { b["page"] = page }
-        b["rssArticle"] = rssArticle.map{$0 as Any} ?? NSNull()
-        b["nextChapterUrl"] = nextChapterURL.map{$0 as Any} ?? NSNull()
-        b["chapter"] = chapter.map{$0 as Any} ?? NSNull()
-        b["title"] = chapter?["title"] ?? NSNull()
+        if let chapter { b["chapter"] = chapter; b["title"] = chapter["title"] ?? "" }
         for (k, v) in extra { b[k] = v }
         return try js.eval(code, b)
     }
@@ -884,11 +874,7 @@ enum LegadoURL {
     static func lenientObject(_ text: String, ctx: LegadoContext) -> [String: Any]? {
         if let d = text.data(using: .utf8), let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] { return o }
         guard text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") else { return nil }
-        if let o = (try? ctx.js.eval("JSON.parse(JSON.stringify(" + text + "))", [:])) as? [String: Any] { return o }
-        // Real sources write typographic quotes, e.g. `{webView:“true”}` (Gson reads them leniently).
-        let normalized = text.replacingOccurrences(of: "“", with: "\"").replacingOccurrences(of: "”", with: "\"")
-        guard normalized != text else { return nil }
-        return (try? ctx.js.eval("JSON.parse(JSON.stringify(" + normalized + "))", [:])) as? [String: Any]
+        return (try? ctx.js.eval("JSON.parse(JSON.stringify(" + text + "))", [:])) as? [String: Any]
     }
 
     /// The `}}` that closes a `{{` (JS inside may itself contain `}}`, e.g. `})()}}`): the first one that leaves the

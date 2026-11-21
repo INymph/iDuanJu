@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import UIKit
 
@@ -35,43 +36,49 @@ struct SeasonPickerSheet: View {
     let onPick: (HGSeries) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("系列全季 · 共\(seasons.count)季").font(.headline).padding(.top, 18).padding(.horizontal, 20)
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(seasons) { s in
-                        let on = s.seriesId == currentId
-                        Button { if !on { onPick(s) } } label: {
-                            HStack(spacing: 12) {
-                                CoverView(url: s.cover, corner: 8).frame(width: 54, height: 72)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 6) {
-                                        if let l = SeasonStore.label(s, in: seasons) {
-                                            Text(l).font(.caption.weight(.bold))
-                                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                                .background((on ? STVTheme.accent : STVTheme.text).opacity(0.12), in: Capsule())
+        WithPerceptionTracking {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("系列全季 · 共\(seasons.count)季").font(.headline).padding(.top, 18).padding(.horizontal, 20)
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        WithPerceptionTracking {
+                            ForEach(seasons) { s in
+                                WithPerceptionTracking {
+                                    let on = s.seriesId == currentId
+                                    Button { if !on { onPick(s) } } label: {
+                                        HStack(spacing: 12) {
+                                            CoverView(url: s.cover, corner: 8).frame(width: 54, height: 72)
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                HStack(spacing: 6) {
+                                                    if let l = SeasonStore.label(s, in: seasons) {
+                                                        Text(l).font(.caption.weight(.bold))
+                                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                                            .background((on ? STVTheme.accent : STVTheme.text).opacity(0.12), in: Capsule())
+                                                    }
+                                                    if on { Text("正在播放").font(.caption2.weight(.semibold)).foregroundStyle(STVTheme.accent) }
+                                                }
+                                                Text(s.title).font(.subheadline.weight(on ? .semibold : .regular)).lineLimit(2)
+                                                    .multilineTextAlignment(.leading)
+                                                if s.episodeCount > 0 {
+                                                    Text("\(s.episodeCount)集").font(.caption).foregroundStyle(STVTheme.secondary)
+                                                }
+                                            }
+                                            Spacer(minLength: 0)
+                                            Image(systemName: on ? "play.circle.fill" : "chevron.right")
+                                                .foregroundStyle(on ? STVTheme.accent : STVTheme.secondary)
                                         }
-                                        if on { Text("正在播放").font(.caption2.weight(.semibold)).foregroundStyle(STVTheme.accent) }
-                                    }
-                                    Text(s.title).font(.subheadline.weight(on ? .semibold : .regular)).lineLimit(2)
-                                        .multilineTextAlignment(.leading)
-                                    if s.episodeCount > 0 {
-                                        Text("\(s.episodeCount)集").font(.caption).foregroundStyle(STVTheme.secondary)
-                                    }
+                                        .padding(10)
+                                        .background(on ? STVTheme.accent.opacity(0.12) : STVTheme.glass, in: RoundedRectangle(cornerRadius: 12))
+                                        .foregroundStyle(STVTheme.text)
+                                    }.buttonStyle(.plain)
                                 }
-                                Spacer(minLength: 0)
-                                Image(systemName: on ? "play.circle.fill" : "chevron.right")
-                                    .foregroundStyle(on ? STVTheme.accent : STVTheme.secondary)
                             }
-                            .padding(10)
-                            .background(on ? STVTheme.accent.opacity(0.12) : STVTheme.glass, in: RoundedRectangle(cornerRadius: 12))
-                            .foregroundStyle(STVTheme.text)
-                        }.buttonStyle(.plain)
-                    }
-                }.padding(.horizontal, 16).padding(.bottom, 20)
+                        }
+                    }.padding(.horizontal, 16).padding(.bottom, 20)
+                }
             }
+            .presentationDetents([.medium, .large])
         }
-        .presentationDetents([.medium, .large])
     }
 }
 
@@ -80,17 +87,21 @@ struct SeasonPickerSheet: View {
 struct CastShelf: View {
     let cast: [HGCelebrity]
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "演员")
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 14) {
-                    ForEach(cast) { c in
-                        if c.id.isEmpty { cell(c) }
-                        else { NavigationLink(value: Route.actor(c)) { cell(c) }.buttonStyle(.plain) }
-                    }
-                }.padding(.horizontal, 16)
-            }
-        }.padding(.top, 4)
+        WithPerceptionTracking {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: "演员")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(cast) { c in
+                            WithPerceptionTracking {
+                                if c.id.isEmpty { cell(c) }
+                                else { NavigationLink(value: Route.actor(c)) { cell(c) }.buttonStyle(.plain) }
+                            }
+                        }
+                    }.padding(.horizontal, 16)
+                }
+            }.padding(.top, 4)
+        }
     }
 
     private func cell(_ c: HGCelebrity) -> some View {
@@ -108,9 +119,11 @@ struct ActorAvatar: View {
     let url: String
     var size: CGFloat = 64
     var body: some View {
-        CoverView(url: url, corner: size / 2)
-            .frame(width: size, height: size)
-            .overlay { Circle().strokeBorder(STVTheme.text.opacity(0.12), lineWidth: 0.8) }
+        WithPerceptionTracking {
+            CoverView(url: url, corner: size / 2)
+                .frame(width: size, height: size)
+                .overlay { Circle().strokeBorder(STVTheme.text.opacity(0.12), lineWidth: 0.8) }
+        }
     }
 }
 
@@ -124,57 +137,63 @@ struct ActorView: View {
     @State private var loading = true
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(spacing: 10) {
-                    ActorAvatar(url: profile?.actor.avatar.isEmpty == false ? profile!.actor.avatar : actor.avatar, size: 104)
-                    Text(profile?.actor.name.isEmpty == false ? profile!.actor.name : actor.name)
-                        .font(.title.weight(.bold)).foregroundStyle(STVTheme.text)
-                        .contextMenu { Button("复制名字", systemImage: "doc.on.doc") { UIPasteboard.general.string = actor.name } }
-                    if !actor.role.isEmpty { Text(actor.role).font(.subheadline).foregroundStyle(STVTheme.secondary) }
-                }
-                .frame(maxWidth: .infinity).padding(.top, 12)
+        WithPerceptionTracking {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(spacing: 10) {
+                        ActorAvatar(url: profile?.actor.avatar.isEmpty == false ? profile!.actor.avatar : actor.avatar, size: 104)
+                        Text(profile?.actor.name.isEmpty == false ? profile!.actor.name : actor.name)
+                            .font(.title.weight(.bold)).foregroundStyle(STVTheme.text)
+                            .contextMenu { Button("复制名字", systemImage: "doc.on.doc") { UIPasteboard.general.string = actor.name } }
+                        if !actor.role.isEmpty { Text(actor.role).font(.subheadline).foregroundStyle(STVTheme.secondary) }
+                    }
+                    .frame(maxWidth: .infinity).padding(.top, 12)
 
-                if let intro = profile?.actor.intro, !intro.isEmpty {
-                    Text(intro).font(.subheadline).foregroundStyle(STVTheme.secondary)
-                        .textSelection(.enabled).padding(.horizontal, 20)
-                }
+                    if let intro = profile?.actor.intro, !intro.isEmpty {
+                        Text(intro).font(.subheadline).foregroundStyle(STVTheme.secondary)
+                            .textSelection(.enabled).padding(.horizontal, 20)
+                    }
 
-                if let rel = profile?.related, !rel.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        SectionHeader(title: "合作演员")
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(alignment: .top, spacing: 14) {
-                                ForEach(rel) { c in
-                                    NavigationLink(value: Route.actor(c)) {
-                                        VStack(spacing: 6) {
-                                            ActorAvatar(url: c.avatar, size: 56)
-                                            Text(c.name).font(.caption).foregroundStyle(STVTheme.text).lineLimit(1)
-                                        }.frame(width: 68)
-                                    }.buttonStyle(.plain)
-                                }
-                            }.padding(.horizontal, 16)
+                    if let rel = profile?.related, !rel.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SectionHeader(title: "合作演员")
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(alignment: .top, spacing: 14) {
+                                    ForEach(rel) { c in
+                                        WithPerceptionTracking {
+                                            NavigationLink(value: Route.actor(c)) {
+                                                VStack(spacing: 6) {
+                                                    ActorAvatar(url: c.avatar, size: 56)
+                                                    Text(c.name).font(.caption).foregroundStyle(STVTheme.text).lineLimit(1)
+                                                }.frame(width: 68)
+                                            }.buttonStyle(.plain)
+                                        }
+                                    }
+                                }.padding(.horizontal, 16)
+                            }
                         }
                     }
-                }
 
-                SectionHeader(title: total > 0 ? "参演作品 · \(total)" : "参演作品")
-                if loading && works.isEmpty {
-                    VStack(spacing: 10) { ForEach(0..<3, id: \.self) { _ in ShimmerBlock().frame(height: 16) } }.padding(.horizontal, 20)
-                } else if let error, works.isEmpty {
-                    ErrorStateView(error: error) { Task { await load() } }
-                } else if works.isEmpty {
-                    Text("暂无作品").font(.subheadline).foregroundStyle(STVTheme.secondary).padding(.horizontal, 20)
-                } else {
-                    NumberedGrid(items: works, numbered: false).padding(.bottom, 30)
+                    SectionHeader(title: total > 0 ? "参演作品 · \(total)" : "参演作品")
+                    if loading && works.isEmpty {
+                        VStack(spacing: 10) { ForEach(0..<3, id: \.self) { _ in WithPerceptionTracking {
+                            ShimmerBlock().frame(height: 16)
+                        } } }.padding(.horizontal, 20)
+                    } else if let error, works.isEmpty {
+                        ErrorStateView(error: error) { Task { await load() } }
+                    } else if works.isEmpty {
+                        Text("暂无作品").font(.subheadline).foregroundStyle(STVTheme.secondary).padding(.horizontal, 20)
+                    } else {
+                        NumberedGrid(items: works, numbered: false).padding(.bottom, 30)
+                    }
                 }
             }
+            .defaultScrollAnchorCompat(DebugScroll.anchor)
+            .background(STVTheme.bg.ignoresSafeArea())
+            .navigationTitle(actor.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .task { if profile == nil && works.isEmpty { await load() } }
         }
-        .compatDefaultScrollAnchor(DebugScroll.anchor)
-        .background(STVTheme.bg.ignoresSafeArea())
-        .navigationTitle(actor.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .task { if profile == nil && works.isEmpty { await load() } }
     }
 
     private func load() async {

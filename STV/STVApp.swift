@@ -1,9 +1,12 @@
+import Perception
 import SwiftUI
+import UIKit
 
 @main
 struct STVApp: App {
     @UIApplicationDelegateAdaptor(OrientationGate.self) private var orientation
     init() {
+        UIScrollView.appearance().delaysContentTouches = false
         CFSolver.install()
         // Load plugin / 采集站 indexes before anything reads `Sites.all` or `SourceGate`.
         MainActor.assumeIsolated { _ = CMSStore.shared; _ = PluginStore.shared }
@@ -142,41 +145,43 @@ enum DebugRoute {
 struct DebugRouteHost: View {
     let route: DebugRoute
     var body: some View {
-        switch route {
-        case .root: RootTabView()
-        case .detail(let sid):
-            #if DEBUG
-            if sid == "ui-detail-sparse" || sid == "ui-detail-full" {
-                NativeDetailEvidence(sparse: sid.hasSuffix("sparse"))
-            } else { NavigationStack { DramaDetailView(series: HGSeries(seriesId: sid, title: "", cover: "")).routes() } }
-            #else
-            NavigationStack { DramaDetailView(series: HGSeries(seriesId: sid, title: "", cover: "")).routes() }
-            #endif
-        case .search(let q): NavigationStack { SearchView(initialQuery: q).routes() }
-        case .searchEdit: NavigationStack { SearchView(startEditingHistory: true).routes() }
-        case .actorRank: NavigationStack { ActorRankView().routes() }
-        case .profile: NavigationStack { ProfileView().routes() }
-        case .sources: NavigationStack { SourcesView().routes() }
-        case .licenses: NavigationStack { LicensesView().routes() }
-        case .history: NavigationStack { LibraryListView(kind: .history).routes() }
-        case .plugins: NavigationStack { PluginsView().routes() }
-        case .siteLog: NavigationStack { SiteLogView().routes() }
-        case .fixturePlay(let path):
-            NavigationStack {
-                VerticalPlayerView(series: HGSeries(source: .telegram, seriesId: "fixture/1/0", title: ProcessInfo.processInfo.environment["STV_FX_TITLE"] ?? "本地彩条测试 · 非真实片源", cover: "",
-                                                    duration: 60, onlineTime: 1_586_390_400, orientation: "landscape", page: URL(fileURLWithPath: path).absoluteString),
-                                   startIndex: Int(ProcessInfo.processInfo.environment["STV_FX_START"] ?? "") ?? 0).routes()
-            }
-        case .tgPlay(let ref):
-            NavigationStack { TGPlayRouteHost(ref: ref).routes() }
-        case .site(let s, let id, let play):
-            let series = HGSeries(source: s, seriesId: id, title: id.uppercased(), cover: "", orientation: "landscape")
-            NavigationStack {
-                Group { if play { VerticalPlayerView(series: series, startIndex: 0) } else { DramaDetailView(series: series) } }.routes()
-            }
-        case .board(let s, let c):
-            NavigationStack {
-                if let cat = Sites.provider(s)?.categories.first(where: { $0.id == c }) { BoardListView(board: BoardSpec(kind: .site(s, cat))).routes() }
+        WithPerceptionTracking {
+            switch route {
+            case .root: RootTabView()
+            case .detail(let sid):
+                #if DEBUG
+                if sid == "ui-detail-sparse" || sid == "ui-detail-full" {
+                    NativeDetailEvidence(sparse: sid.hasSuffix("sparse"))
+                } else { NavigationStack { DramaDetailView(series: HGSeries(seriesId: sid, title: "", cover: "")).routes() } }
+                #else
+                NavigationStack { DramaDetailView(series: HGSeries(seriesId: sid, title: "", cover: "")).routes() }
+                #endif
+            case .search(let q): NavigationStack { SearchView(initialQuery: q).routes() }
+            case .searchEdit: NavigationStack { SearchView(startEditingHistory: true).routes() }
+            case .actorRank: NavigationStack { ActorRankView().routes() }
+            case .profile: NavigationStack { ProfileView().routes() }
+            case .sources: NavigationStack { SourcesView().routes() }
+            case .licenses: NavigationStack { LicensesView().routes() }
+            case .history: NavigationStack { LibraryListView(kind: .history).routes() }
+            case .plugins: NavigationStack { PluginsView().routes() }
+            case .siteLog: NavigationStack { SiteLogView().routes() }
+            case .fixturePlay(let path):
+                NavigationStack {
+                    VerticalPlayerView(series: HGSeries(source: .telegram, seriesId: "fixture/1/0", title: ProcessInfo.processInfo.environment["STV_FX_TITLE"] ?? "本地彩条测试 · 非真实片源", cover: "",
+                                                        duration: 60, onlineTime: 1_586_390_400, orientation: "landscape", page: URL(fileURLWithPath: path).absoluteString),
+                                       startIndex: Int(ProcessInfo.processInfo.environment["STV_FX_START"] ?? "") ?? 0).routes()
+                }
+            case .tgPlay(let ref):
+                NavigationStack { TGPlayRouteHost(ref: ref).routes() }
+            case .site(let s, let id, let play):
+                let series = HGSeries(source: s, seriesId: id, title: id.uppercased(), cover: "", orientation: "landscape")
+                NavigationStack {
+                    Group { if play { VerticalPlayerView(series: series, startIndex: 0) } else { DramaDetailView(series: series) } }.routes()
+                }
+            case .board(let s, let c):
+                NavigationStack {
+                    if let cat = Sites.provider(s)?.categories.first(where: { $0.id == c }) { BoardListView(board: BoardSpec(kind: .site(s, cat))).routes() }
+                }
             }
         }
     }
@@ -196,19 +201,21 @@ struct TGPlayRouteHost: View {
     @State private var series: HGSeries?
     @State private var error = ""
     var body: some View {
-        Group {
-            if let series { VerticalPlayerView(series: series, startIndex: 0) }
-            else { Text(error.isEmpty ? "加载帖子…" : error).foregroundStyle(.white) }
-        }
-        .task {
-            let p = ref.split(separator: "/").map(String.init)
-            guard p.count >= 2, let id = Int(p[1]) else { error = "bad ref"; return }
-            let i = p.count > 2 ? Int(p[2]) ?? 0 : 0
-            do {
-                guard let post = try await TGClient.shared.post(p[0], id), let s = TGVideoProvider.series(post, media: i, channel: nil) else { error = "帖子无视频"; return }
-                NSLog("%@", "[STV] tgplay \(ref) page=\(s.page?.prefix(60) ?? "-")")
-                series = s
-            } catch { self.error = error.localizedDescription }
+        WithPerceptionTracking {
+            Group {
+                if let series { VerticalPlayerView(series: series, startIndex: 0) }
+                else { Text(error.isEmpty ? "加载帖子…" : error).foregroundStyle(.white) }
+            }
+            .task {
+                let p = ref.split(separator: "/").map(String.init)
+                guard p.count >= 2, let id = Int(p[1]) else { error = "bad ref"; return }
+                let i = p.count > 2 ? Int(p[2]) ?? 0 : 0
+                do {
+                    guard let post = try await TGClient.shared.post(p[0], id), let s = TGVideoProvider.series(post, media: i, channel: nil) else { error = "帖子无视频"; return }
+                    NSLog("%@", "[STV] tgplay \(ref) page=\(s.page?.prefix(60) ?? "-")")
+                    series = s
+                } catch { self.error = error.localizedDescription }
+            }
         }
     }
 }
@@ -229,7 +236,9 @@ private struct NativeDetailEvidence: View {
         return d
     }
     var body: some View {
-        NavigationStack { DramaDetailView(series: HGSeries(seriesId: "ui-detail", title: seed.title, cover: "", episodeCount: 48), seededDetail: seed).routes() }
+        WithPerceptionTracking {
+            NavigationStack { DramaDetailView(series: HGSeries(seriesId: "ui-detail", title: seed.title, cover: "", episodeCount: 48), seededDetail: seed).routes() }
+        }
     }
 }
 #endif

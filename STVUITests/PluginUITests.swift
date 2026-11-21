@@ -26,31 +26,6 @@ final class PluginUITests: XCTestCase {
     }
     func text(_ s: String) -> XCUIElement { app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", s)).firstMatch }
 
-    func testOptInReviewedM3UNativePlayback() throws {
-        guard let path = ProcessInfo.processInfo.environment["STV_COMPAT_BUNDLE"] else { throw XCTSkip("set STV_COMPAT_BUNDLE") }
-        launch(["STV_PLUGIN_FILE":path])
-        let tab = el("home.channel.公开测试动画 M3U")
-        for _ in 0..<8 {
-            if tab.exists && tab.isHittable { break }
-            el("home.channels").swipeLeft()
-        }
-        tap(tab)
-        tap(text("Big Buck Bunny"))
-        XCTAssertTrue(el("detail.play").waitForExistence(timeout: 20))
-        shot("ios-m3u-animation-detail")
-        tap(el("detail.play"))
-        // A successful resolver alone is NOT playback. Wait for the native transport clock.
-        let clock = el("player.time")
-        XCTAssertTrue(clock.waitForExistence(timeout: 35))
-        var advanced = false
-        for _ in 0..<30 {
-            if clock.exists && !["00:00", "0:00", ""].contains(clock.label) { advanced = true; break }
-            Thread.sleep(forTimeInterval: 1)
-        }
-        shot("ios-m3u-animation-playing")
-        XCTAssertTrue(advanced, "native playback clock did not advance")
-    }
-
     func testPluginManagerFromProfile() {
         launch(["STV_ROUTE": "profile", "STV_PLUGIN_DEMO": "1", "STV_CMS_FIXTURE": "1"])
         let entry = app.staticTexts["插件"].firstMatch

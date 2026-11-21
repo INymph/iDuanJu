@@ -3,10 +3,5 @@
     <application>
         <!-- Debug-only end-to-end probe (not in release): am broadcast -n app.iduanju/.debug.E2EReceiver -->
         <receiver android:name="app.iduanju.debug.E2EReceiver" android:exported="true" />
-        <!-- Debug-only PixelCopy window snapshot for emulators whose screencap is blank: am broadcast -n <applicationId>/app.iduanju.debug.QaSnapshotReceiver -->
-        <provider android:name="app.iduanju.debug.QaSnapshotInit" android:authorities="${applicationId}.qasnapshot" android:exported="false" />
-        <receiver android:name="app.iduanju.debug.QaSnapshotReceiver" android:exported="true" />
-        <!-- Debug-only synthetic offline novel data for visual QA: am broadcast -n <applicationId>/app.iduanju.debug.QaNovelFixtureReceiver -->
-        <receiver android:name="app.iduanju.debug.QaNovelFixtureReceiver" android:exported="true" />
     </application>
 </manifest>

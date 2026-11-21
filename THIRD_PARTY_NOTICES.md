@@ -45,29 +45,14 @@ Pornhub (mediaDefinitions) were cross-checked against its extractors. The Swift 
   host CSS selector API; independent implementations.
 - 苹果 CMS v10 采集接口 (`?ac=list|detail`) adapter: independent implementation of the public API format.
 
-## AetherEngine — LGPL-3.0 with App Store / DRM Exception (player core, 1.5 build 2+)
-- https://github.com/superuser404notfound/AetherEngine — **tag 7.62.0** (commit a1d2cab8281cbf06f5f459b05dad4653ad12559f),
-  SwiftPM product `AetherEngine`, statically linked, **unmodified**. Copyright (C) 2026 Vincent Herbst.
-- Distributed under the license's App Store / DRM exception (end-user re-linking of the app binary is waived by that
-  exception); the corresponding source is the 7.62.0 tag above. Full text: `STV/Resources/Licenses/AetherEngine-LICENSE.txt`
-  (bundled, shown in 开源许可).
-- Only the `AetherEngine` product is linked; SMBClient appears in Package.resolved but is not linked (no symbols).
+## Swift Perception — MIT (iOS 16 compatibility)
+- https://github.com/pointfreeco/swift-perception — tag 1.6.0, unmodified SwiftPM dependency.
+- Copyright (c) Point-Free, Inc. Full license: `STV/Resources/Licenses/Perception-MIT.txt`.
+- Backports Observation and Bindable to iOS 16; view bodies and escaping view-builder closures use WithPerceptionTracking.
 
-## FFmpeg (via FFmpegBuild 3.14.0) — LGPL-2.1-or-later, dynamically linked
-- https://github.com/superuser404notfound/FFmpegBuild — tag 3.14.0 (commit 2ff2238f6b65d7686e71c8aa9e45fa4e26f33e1d);
-  build script, configure flags and local FFmpeg / libzvbi patches are in that tag's `build.sh` and `patches/`.
-- FFmpeg built without `--enable-gpl` / `--enable-version3`. Shipped as dynamic frameworks in `STV.app/Frameworks/`
-  (`AetherLibavcodec`, `AetherLibavformat`, `AetherLibavutil`, `AetherLibswresample`, `AetherLibswscale`, `AetherLibavfilter`),
-  never merged into the app binary, so they can be replaced/relinked.
-- libzvbi (`AetherLibzvbi`): LGPL-2.0-or-later conveyed under LGPL-2.1, `ure.c` MIT; GPL-2 files removed by build.sh.
-- Texts: `STV/Resources/Licenses/FFmpeg-LGPL-2.1.txt`, `libzvbi-ure-MIT.txt`.
-
-## dav1d — BSD-2-Clause (`AetherLibdav1d`), zimg — WTFPL (`AetherLibzimg`)
-- Unmodified upstream sources built by FFmpegBuild 3.14.0. Texts: `dav1d-BSD-2-Clause.txt`, `zimg-WTFPL.txt`.
-
-## libdovi (dovi_tool `dolby_vision` crate, via LibDovi 2.2.0) — MIT
-- https://github.com/quietvoid/dovi_tool — Copyright (c) quietvoid and contributors (MIT OR Apache-2.0, used under MIT).
-- Packaged by https://github.com/superuser404notfound/LibDovi tag 2.2.0 (static). Text: `LibDovi-LICENSE.txt`.
+## Removed player components in this branch
+AetherEngine, FFmpegBuild, libzvbi, dav1d, zimg and libdovi are no longer linked or shipped as frameworks.
+Their original license texts are retained as historical source notices. Playback uses Apple's system AVFoundation / AVKit.
 
 ## Reverse-engineered protocol data (Hongguo / 红果)
 - `STV/Providers/Hongguo/*` and `STV/Resources/medusa_tables.bin` implement the Hongguo app's request signing

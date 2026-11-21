@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import UIKit
 
@@ -72,15 +73,17 @@ enum STVTheme {
 struct GlassBackground: ViewModifier {
     var radius: CGFloat = 20
     func body(content: Content) -> some View {
-        content
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0.05)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing),
-                        lineWidth: 0.8)
-            )
+        WithPerceptionTracking {
+            content
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0.05)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing),
+                            lineWidth: 0.8)
+                )
+        }
     }
 }
 
@@ -93,8 +96,10 @@ struct GlassChip: View {
     let selected: Bool
     let action: () -> Void
     var body: some View {
-        Button(action: action) { Text(title) }
-            .buttonStyle(ToneChipStyle(on: selected))
+        WithPerceptionTracking {
+            Button(action: action) { Text(title) }
+                .buttonStyle(ToneChipStyle(on: selected))
+        }
     }
 }
 
@@ -103,13 +108,17 @@ struct GlassChipBar<T: Hashable>: View {
     @Binding var selection: T
     let label: (T) -> String
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(items, id: \.self) { it in
-                    GlassChip(title: label(it), selected: selection == it) { selection = it }
+        WithPerceptionTracking {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(items, id: \.self) { it in
+                        WithPerceptionTracking {
+                            GlassChip(title: label(it), selected: selection == it) { selection = it }
+                        }
+                    }
                 }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
         }
     }
 }

@@ -184,15 +184,12 @@ final class PluginNet: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     }
 
     deinit { session.invalidateAndCancel() }
-    /// Owning transient media route ended: stop in-flight network and release URLSession's delegate retain.
-    func cancel() { session.invalidateAndCancel() }
 
     /// Throws E_PERMISSION when the URL is not reachable for this plugin.
     func check(_ url: URL) throws {
         guard let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
             throw PluginError.runtime(code: "E_PERMISSION", message: "只允许 http/https：\(url.absoluteString.prefix(80))")
         }
-        guard url.user == nil, url.password == nil else { throw PluginError.runtime(code:"E_PERMISSION",message:"网址不可携带凭证") }
         guard let host = url.host?.lowercased(), !host.isEmpty else { throw PluginError.runtime(code: "E_PERMISSION", message: "地址没有域名") }
         if NetGuard.isIPLiteral(host) { throw PluginError.runtime(code: "E_PERMISSION", message: "不允许直接访问 IP：\(host)") }
         if url.port != nil && url.port != 443 && url.port != 80 { throw PluginError.runtime(code: "E_PERMISSION", message: "不允许非标准端口：\(host):\(url.port!)") }

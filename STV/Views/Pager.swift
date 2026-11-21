@@ -1,16 +1,19 @@
+import Perception
 import SwiftUI
 
-@MainActor
-final class Pager: ObservableObject {
-    @Published var items: [HGSeries] = []
-    @Published var hasMore = true
-    @Published var isLoading = false
-    @Published var error: Error?
-    @Published private(set) var page = HGPage(items: [], hasMore: true, nextOffset: 0)
+@MainActor @Perceptible
+final class Pager {
+    var items: [HGSeries] = []
+    var hasMore = true
+    var isLoading = false
+    var error: Error?
+    private(set) var page = HGPage(items: [], hasMore: true, nextOffset: 0)
     private var fetch: ((HGPage, [HGSeries]) async throws -> HGPage)?
     private var token = UUID()
+    @PerceptionIgnored private var request: Task<Void, Never>?
 
     func reset(_ f: @escaping (HGPage, [HGSeries]) async throws -> HGPage) {
+        request?.cancel()
         fetch = f; items = []; hasMore = true; error = nil; isLoading = false
         page = HGPage(items: [], hasMore: true, nextOffset: 0); token = UUID()
         loadMore()
@@ -20,17 +23,17 @@ final class Pager: ObservableObject {
         guard let fetch, hasMore, !isLoading else { return }
         isLoading = true
         let t = token, prev = page, seen = items
-        Task {
+        request = Task {
             do {
                 let p = try await fetch(prev, seen)
-                guard t == token else { return }
+                guard t == token, !Task.isCancelled else { return }
                 var ids = Set(items.map(\.id))
                 items += p.items.filter { ids.insert($0.id).inserted }
                 page = p
                 hasMore = p.hasMore && !p.items.isEmpty
                 error = nil
             } catch {
-                guard t == token else { return }
+                guard t == token, !Task.isCancelled else { return }
                 self.error = error
             }
             if t == token { isLoading = false }

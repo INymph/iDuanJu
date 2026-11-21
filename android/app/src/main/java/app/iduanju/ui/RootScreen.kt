@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
@@ -20,10 +19,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import dev.chrisbanes.haze.hazeSource
 import app.iduanju.ui.category.CategoryScreen
-import app.iduanju.ui.components.GlassNavigationRail
 import app.iduanju.ui.components.GlassTabBar
-import app.iduanju.ui.components.LayoutMetrics
-import app.iduanju.ui.components.LocalLayoutMetrics
 import app.iduanju.ui.detail.DetailScreen
 import app.iduanju.ui.home.HomeScreen
 import app.iduanju.ui.player.PlayerScreen
@@ -44,46 +40,12 @@ fun RootScreen(initialRoute: String? = null) {
     var novelImmersive by remember { mutableStateOf(false) }
     val back = nav.currentBackStackEntryAsState().value
     val route = back?.destination?.route ?: "home"
-    LaunchedEffect(route) { when (route) { "home" -> tab = 0; "tvbox" -> tab = 1; "category" -> tab = 2; "profile" -> tab = 3 } }
-    val atRoot = route in setOf("home", "tvbox", "search", "category", "profile")
+    LaunchedEffect(route) { when(route) { "home" -> tab=0; "search" -> tab=1; "category" -> tab=2; "profile" -> tab=3 } }
+    val atRoot = route in setOf("home", "search", "category", "profile")
     /** Backdrop for the floating tab bar's blur (Haze): everything the NavHost draws. */
     val haze = androidx.compose.runtime.remember { dev.chrisbanes.haze.HazeState() }
-    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val metrics = remember(maxWidth, maxHeight, cfg.smallestScreenWidthDp) {
-            LayoutMetrics(
-                widthDp = maxWidth.value.toInt(),
-                heightDp = maxHeight.value.toInt(),
-                smallestWidthDp = cfg.smallestScreenWidthDp,
-            )
-        }
-        val showChromeNav = atRoot && !(route == "home" && novelImmersive)
-        val navItems = listOf<Pair<String, @Composable (Boolean) -> Unit>>(
-            "首页" to { on -> Icon(Icons.Filled.Home, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-            "TVBox" to { on -> Icon(Icons.Filled.LiveTv, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-            "找剧" to { on -> Icon(Icons.Filled.GridView, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-            "我的" to { on -> Icon(Icons.Filled.Person, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-        )
-        val onSelectTab: (Int) -> Unit = {
-            tab = it
-            nav.navigate(listOf("home", "tvbox", "category", "profile")[it]) {
-                popUpTo(nav.graph.startDestinationId) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
-            }
-        }
-        val onSelectSearch: () -> Unit = {
-            nav.navigate("search") {
-                popUpTo(nav.graph.startDestinationId) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
-            }
-        }
-        val searchIcon: @Composable (Boolean) -> Unit = { on ->
-            Icon(Icons.Filled.Search, null, Modifier.size(22.dp), tint = if (on) IdjThemeColors.accent else IdjThemeColors.text)
-        }
-
+    Box(Modifier.fillMaxSize()) {
         // "home/<source>" (我的 → Telegram 频道 / 漫画) switches to the 首页 tab and shows that source page.
         val navigate: (String) -> Unit = { r ->
             if (r.startsWith("home/")) {
@@ -92,88 +54,9 @@ fun RootScreen(initialRoute: String? = null) {
                 nav.navigate("home") { popUpTo(nav.graph.startDestinationId) { saveState = true }; launchSingleTop = true; restoreState = true }
             } else nav.navigate(r)
         }
-        androidx.compose.runtime.CompositionLocalProvider(
-            LocalNavigate provides navigate,
-            LocalLayoutMetrics provides metrics,
-        ) {
-            Row(Modifier.fillMaxSize()) {
-                if (showChromeNav && metrics.useRail) {
-                    GlassNavigationRail(
-                        selected = tab,
-                        items = navItems,
-                        onSelect = onSelectTab,
-                        searchSelected = route == "search",
-                        onSearch = onSelectSearch,
-                        searchIcon = searchIcon,
-                        haze = haze,
-                    )
-                }
-                NavHost(nav, startDestination = "home", modifier = Modifier.weight(1f).fillMaxHeight().hazeSource(haze)) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalNavigate provides navigate) {
+            NavHost(nav, startDestination = "home", modifier = Modifier.fillMaxSize().hazeSource(haze)) {
                 composable("home") { HomeScreen(onOpenDetail = { nav.navigate("detail/$it") }, onSearch = { nav.navigate("search") }, onPlay = { nav.navigate("player/$it/0") }, onOpenManga = { nav.navigate("manga/" + android.net.Uri.encode(it)) }, onImmersiveChanged = { novelImmersive = it }) }
-                composable("tvbox") {
-                    app.iduanju.tvbox.TVBoxHubScreen(
-                        onOpenConfig = { nav.navigate("tvbox/config") },
-                        onOpenVodPlayer = { siteKey, sid, title, cover, ep ->
-                            nav.navigate(
-                                "tvbox/vod/${android.net.Uri.encode(siteKey)}/${android.net.Uri.encode(sid)}/$ep?title=${android.net.Uri.encode(title)}&cover=${android.net.Uri.encode(cover)}",
-                            )
-                        },
-                        onOpenLivePlayer = { repoId, liveId, chIdx ->
-                            nav.navigate("tvbox/live/${android.net.Uri.encode(repoId)}/${android.net.Uri.encode(liveId)}/$chIdx")
-                        },
-                    )
-                }
-                composable("tvbox/config") {
-                    app.iduanju.tvbox.TVBoxConfigScreen(
-                        onBack = { nav.popBackStack() },
-                        onOpenLive = { repoId, liveId ->
-                            nav.navigate("tvbox/live/${android.net.Uri.encode(repoId)}/${android.net.Uri.encode(liveId)}/0")
-                        },
-                    )
-                }
-                composable(
-                    "tvbox/vod/{siteKey}/{sid}/{ep}?title={title}&cover={cover}",
-                    arguments = listOf(
-                        navArgument("siteKey") { type = NavType.StringType },
-                        navArgument("sid") { type = NavType.StringType },
-                        navArgument("ep") { type = NavType.IntType },
-                        navArgument("title") { defaultValue = "" },
-                        navArgument("cover") { defaultValue = "" },
-                    ),
-                ) { e ->
-                    val args = requireNotNull(e.arguments)
-                    app.iduanju.tvbox.TVBoxVodPlayerScreen(
-                        siteKey = args.getString("siteKey").orEmpty(),
-                        seriesId = args.getString("sid").orEmpty(),
-                        initialTitle = args.getString("title").orEmpty(),
-                        initialCover = args.getString("cover").orEmpty(),
-                        startEp = args.getInt("ep"),
-                        onBack = { nav.popBackStack() },
-                        onSwitchSiteSeries = { newSiteKey, newSid, title, cover ->
-                            nav.navigate(
-                                "tvbox/vod/${android.net.Uri.encode(newSiteKey)}/${android.net.Uri.encode(newSid)}/0?title=${android.net.Uri.encode(title)}&cover=${android.net.Uri.encode(cover)}",
-                            ) {
-                                popUpTo("tvbox/vod/{siteKey}/{sid}/{ep}?title={title}&cover={cover}") { inclusive = true }
-                            }
-                        },
-                    )
-                }
-                composable(
-                    "tvbox/live/{repoId}/{liveId}/{chIdx}",
-                    arguments = listOf(
-                        navArgument("repoId") { type = NavType.StringType },
-                        navArgument("liveId") { type = NavType.StringType },
-                        navArgument("chIdx") { type = NavType.IntType },
-                    ),
-                ) { e ->
-                    val args = requireNotNull(e.arguments)
-                    app.iduanju.tvbox.TVBoxLivePlayerScreen(
-                        repoId = args.getString("repoId").orEmpty(),
-                        liveId = args.getString("liveId").orEmpty(),
-                        startChannelIndex = args.getInt("chIdx"),
-                        onBack = { nav.popBackStack() },
-                    )
-                }
                 composable("search") { SearchScreen(onOpenDetail = { nav.navigate("detail/$it") }) }
                 composable("category") { CategoryScreen(onOpenDetail = { nav.navigate("detail/$it") }) }
                 composable("library/{kind}") { e -> app.iduanju.ui.library.LibraryListScreen(e.arguments!!.getString("kind")!!, onBack = { nav.popBackStack() }, onOpenDetail = { nav.navigate("detail/$it") }) }
@@ -182,15 +65,7 @@ fun RootScreen(initialRoute: String? = null) {
                 composable("plugins") { app.iduanju.ui.profile.PluginsScreen(onBack = { nav.popBackStack() }) }
                 composable("novel") { app.iduanju.novel.NovelScreen(onBack = { nav.popBackStack() }) }
                 composable("licenses") { app.iduanju.ui.profile.LicensesScreen(onBack = { nav.popBackStack() }) }
-                composable("actorRank") { app.iduanju.ui.profile.ActorRankScreen(onBack = { nav.popBackStack() }) }
-                composable("actor/{id}?name={name}&avatar={avatar}&role={role}&intro={intro}",
-                    arguments = listOf("name", "avatar", "role", "intro").map { navArgument(it) { defaultValue = "" } }) { entry ->
-                    val args = requireNotNull(entry.arguments)
-                    val actor = app.iduanju.core.hongguo.HGCelebrity(requireNotNull(args.getString("id")),
-                        args.getString("name").orEmpty(), args.getString("avatar").orEmpty(),
-                        args.getString("role").orEmpty(), args.getString("intro").orEmpty())
-                    app.iduanju.ui.profile.ActorProfileScreen(actor, onBack = { nav.popBackStack() }, onOpen = { nav.navigate("detail/$it") })
-                }
+                composable("actorRank") { app.iduanju.ui.profile.ActorRankScreen(onBack = { nav.popBackStack() }, onSearch = { nav.navigate("actorSearch/" + android.net.Uri.encode(it)) }) }
                 composable("actorSearch/{name}") { e -> SearchScreen(onOpenDetail = { nav.navigate("detail/$it") }, initialQuery = e.arguments!!.getString("name")!!) }
                 composable("board/{genre}/{sub}") { e -> app.iduanju.ui.category.BoardScreen(app.iduanju.ui.home.BoardSpec(app.iduanju.core.hongguo.HGRankGenre.valueOf(e.arguments!!.getString("genre")!!), app.iduanju.core.hongguo.HGRankSub.valueOf(e.arguments!!.getString("sub")!!)), onBack = { nav.popBackStack() }, onOpenDetail = { nav.navigate("detail/$it") }) }
                 composable("detail/{sid}", arguments = listOf(navArgument("sid") { type = NavType.StringType })) { e ->
@@ -221,16 +96,25 @@ fun RootScreen(initialRoute: String? = null) {
                     )
                 }
             }
-            }
+
         }
-        if (showChromeNav && !metrics.useRail) {
+        if (atRoot && !(route == "home" && novelImmersive)) {
             GlassTabBar(
                 selected = tab,
-                items = navItems,
-                onSelect = onSelectTab,
-                searchSelected = route == "search",
-                onSearch = onSelectSearch,
-                searchIcon = searchIcon,
+                items = listOf(
+                    "首页" to { on -> Icon(Icons.Filled.Home, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "搜索" to { on -> Icon(Icons.Filled.Search, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "找剧" to { on -> Icon(Icons.Filled.GridView, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "我的" to { on -> Icon(Icons.Filled.Person, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                ),
+                onSelect = {
+                    tab = it
+                    nav.navigate(listOf("home", "search", "category", "profile")[it]) {
+                        popUpTo(nav.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
                 haze = haze,
                 modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 4.dp),
             )

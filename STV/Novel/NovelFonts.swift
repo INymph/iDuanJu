@@ -1,13 +1,13 @@
 import UIKit
 import CoreText
-import Combine
+import Perception
 
 /// Reader typefaces. 苹方 ships with iOS; 宋体 / 楷体 / 圆体 are Apple's downloadable system fonts;
 /// 霞鹜文楷 (Lite) / 思源宋体 / 思源黑体 (all SIL OFL 1.1) are downloaded on first use from the projects' GitHub
 /// repositories — through jsDelivr first (reachable and fast in mainland China), GitHub as the fallback —
 /// and registered for this process only.
-@MainActor
-final class NovelFonts: ObservableObject {
+@MainActor @Perceptible
+final class NovelFonts {
     static let shared = NovelFonts()
 
     struct Entry: Identifiable, Hashable {
@@ -49,11 +49,11 @@ final class NovelFonts: ObservableObject {
     ]
 
     /// 0…1 while downloading, keyed by font id.
-    @Published private(set) var progress: [String: Double] = [:]
-    @Published private(set) var errors: [String: String] = [:]
+    private(set) var progress: [String: Double] = [:]
+    private(set) var errors: [String: String] = [:]
     /// Bumped when a font becomes available so pages re-render.
-    @Published private(set) var revision = 0
-    private var registered: Set<String> = []
+    private(set) var revision = 0
+    @PerceptionIgnored private var registered: Set<String> = []
 
     nonisolated static var dir: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("NovelFonts", isDirectory: true)
