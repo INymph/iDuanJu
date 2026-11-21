@@ -12,7 +12,7 @@ OUT=$(cd "$OUT" && pwd)
 LOG_DIR="${STV_BUILD_LOG_DIR:-$OUT/logs}"
 mkdir -p "$LOG_DIR"
 xcodegen generate >/dev/null
-common=(-project STV.xcodeproj -scheme STV -configuration Release CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="")
+common=(-project STV.xcodeproj -scheme STV -configuration Release -skipMacroValidation CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="")
 
 xcodebuild "${common[@]}" -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath DerivedDataRelease build 2>&1 | tee "$LOG_DIR/ios.log"
 APP_PLIST=DerivedDataRelease/Build/Products/Release-iphoneos/STV.app/Info.plist
