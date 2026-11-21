@@ -52,42 +52,7 @@ struct NovelHomeView: View {
     /// ui-redesign 04: 继续阅读 card, four shortcut tiles, then the 3-column shelf.
     var body: some View {
         WithPerceptionTracking {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if let b = store.shelf.first(where: { store.fraction($0) != nil }) ?? store.shelf.first {
-                        continueCard(b).padding(.top, 24).transition(.opacity)
-                    }
-                    tiles.padding(.top, store.books.isEmpty ? 24 : 14)
-                    DSSectionHeader(title: "我的书架", note: store.books.isEmpty ? nil : "\(store.books.count) 本")
-                        .overlay(alignment: .trailing) { if busy { ProgressView().controlSize(.small).padding(.trailing, 16) } }
-                        .padding(.top, 24)
-                    if store.books.isEmpty {
-                        VStack(spacing: 8) {
-                            Image(systemName: "books.vertical").font(.system(size: 30)).foregroundStyle(STVTheme.tertiary)
-                            Text("书架是空的").font(.system(size: 16, weight: .semibold)).foregroundStyle(STVTheme.text)
-                            Text("「导入」本地 TXT / EPUB，或导入「阅读」书源后「搜书」。")
-                                .font(.system(size: 13)).foregroundStyle(STVTheme.secondary).multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity).padding(.vertical, 44).padding(.horizontal, 24)
-                    } else {
-                        LazyVGrid(columns: cols, spacing: 16) {
-                            WithPerceptionTracking {
-                                ForEach(store.shelf) { b in
-                                    WithPerceptionTracking {
-                                        Button { reading = b } label: { bookCell(b) }
-                                            .buttonStyle(PressScale(scale: 0.97))
-                                            .contextMenu { Button("删除", systemImage: "trash", role: .destructive) { deleting = b } }
-                                            .accessibilityIdentifier("novel.book.\(b.title)")
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 16).padding(.top, 12)
-                    }
-                }
-                .padding(.bottom, 100)
-                .animation(DS.panel, value: store.books.count)
-            }
+            shelfScroll
             .scrollIndicators(.hidden)
             .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .epub], allowsMultipleSelection: true) { r in
                 guard case .success(let urls) = r, !urls.isEmpty else { return }
@@ -143,6 +108,49 @@ struct NovelHomeView: View {
                 }
                 #endif
             }
+        }
+    }
+
+    @ViewBuilder private var shelfScroll: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let b = store.shelf.first(where: { store.fraction($0) != nil }) ?? store.shelf.first {
+                    continueCard(b).padding(.top, 24).transition(.opacity)
+                }
+                tiles.padding(.top, store.books.isEmpty ? 24 : 14)
+                DSSectionHeader(title: "我的书架", note: store.books.isEmpty ? nil : "\(store.books.count) 本")
+                    .overlay(alignment: .trailing) { if busy { ProgressView().controlSize(.small).padding(.trailing, 16) } }
+                    .padding(.top, 24)
+                shelfContent
+            }
+            .padding(.bottom, 100)
+            .animation(DS.panel, value: store.books.count)
+        }
+    }
+
+    @ViewBuilder private var shelfContent: some View {
+        if store.books.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "books.vertical").font(.system(size: 30)).foregroundStyle(STVTheme.tertiary)
+                Text("书架是空的").font(.system(size: 16, weight: .semibold)).foregroundStyle(STVTheme.text)
+                Text("「导入」本地 TXT / EPUB，或导入「阅读」书源后「搜书」。")
+                    .font(.system(size: 13)).foregroundStyle(STVTheme.secondary).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 44).padding(.horizontal, 24)
+        } else {
+            LazyVGrid(columns: cols, spacing: 16) {
+                WithPerceptionTracking {
+                    ForEach(store.shelf) { b in
+                        WithPerceptionTracking {
+                            Button { reading = b } label: { bookCell(b) }
+                                .buttonStyle(PressScale(scale: 0.97))
+                                .contextMenu { Button("删除", systemImage: "trash", role: .destructive) { deleting = b } }
+                                .accessibilityIdentifier("novel.book.\(b.title)")
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 12)
         }
     }
 

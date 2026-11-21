@@ -21,83 +21,7 @@ struct PluginsView: View {
 
     var body: some View {
         WithPerceptionTracking {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    group("已安装（\(store.visiblePlugins.count)）") {
-                        if store.visiblePlugins.isEmpty {
-                            Text("还没有插件。可以从下面的网址 / 文件 / 订阅添加，或安装内置推荐。").font(.subheadline)
-                                .foregroundStyle(STVTheme.secondary).padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        ForEach(store.visiblePlugins) { p in
-                            WithPerceptionTracking {
-                                NavigationLink { PluginDetailView(id: p.id) } label: { pluginRow(p) }.buttonStyle(.plain)
-                                    .accessibilityIdentifier("plugins.row.\(p.id)")
-                                if p.id != store.visiblePlugins.last?.id { Divider().overlay(STVTheme.text.opacity(0.06)).padding(.leading, 48) }
-                            }
-                        }
-                    }
-                    if hiddenAdult > 0 {
-                        note("另有 \(hiddenAdult) 个成人插件已隐藏：在「片源管理」解锁后显示。")
-                    }
-                    group("添加插件") {
-                        action("从网址添加", "link", id: "plugins.add.url") { urlText = ""; showURL = true }
-                        action("从文件导入（.idjplugin）", "doc.badge.plus", id: "plugins.add.file") { showFile = true }
-                        action("粘贴插件内容", "doc.on.clipboard", id: "plugins.add.paste") { showPaste = true }
-                        action(busy == "update" ? "正在检查更新…" : "检查更新", "arrow.triangle.2.circlepath", id: "plugins.update") { await checkUpdates() }
-                    }
-                    ForEach(updates) { u in
-                        WithPerceptionTracking {
-                            Button { pending = u } label: {
-                                HStack { Image(systemName: "arrow.up.circle.fill").foregroundStyle(STVTheme.accent)
-                                    Text("\(u.manifest.name) 可更新到 \(u.manifest.version)").foregroundStyle(STVTheme.text); Spacer()
-                                    Text("查看权限变化").font(.caption).foregroundStyle(STVTheme.accent) }.padding(14)
-                            }.buttonStyle(.plain).background(STVTheme.surface, in: RoundedRectangle(cornerRadius: 14)).padding(.horizontal, 16)
-                        }
-                    }
-                    group("订阅") {
-                        ForEach(store.subscriptions) { s in WithPerceptionTracking {
-                            subscriptionBlock(s)
-                        } }
-                        action("添加订阅地址", "plus.circle", id: "plugins.sub.add") { subText = ""; showSub = true }
-                        if !store.subscriptions.isEmpty {
-                            action(busy == "subs" ? "正在刷新…" : "刷新全部订阅", "arrow.clockwise", id: "plugins.sub.refresh") {
-                                busy = "subs"; await store.refreshSubscriptions(); busy = nil
-                            }
-                        }
-                    }
-                    group("采集站（苹果 CMS）") {
-                        ForEach(cms.visibleSites) { s in WithPerceptionTracking {
-                            cmsRow(s)
-                        } }
-                        action("添加采集站", "server.rack", id: "plugins.cms.add") { showCMS = true }
-                    }
-                    note("采集站使用内置的苹果 CMS v10 适配器（?ac=list / ?ac=detail），不运行任何脚本；只播放线路里的 m3u8 / mp4 直链，接口需支持 https。")
-                    if !recommended.isEmpty {
-                        group("推荐插件（App 内置）") {
-                            ForEach(recommended, id: \.manifest.id) { b in
-                                WithPerceptionTracking {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(b.manifest.name).foregroundStyle(STVTheme.text)
-                                            Text(b.manifest.description ?? "").font(.caption).foregroundStyle(STVTheme.secondary).lineLimit(2)
-                                        }
-                                        Spacer()
-                                        if store.plugin(b.manifest.id) != nil { Text("已安装").font(.caption).foregroundStyle(STVTheme.secondary) }
-                                        else {
-                                            Button("安装") { prepare { try PluginInstaller.prepare(bundle: b.data, origin: "内置：" + b.name) } }
-                                                .buttonStyle(.bordered).tint(STVTheme.accent).accessibilityIdentifier("plugins.bundled.\(b.name)")
-                                        }
-                                    }.padding(14)
-                                }
-                            }
-                        }
-                    } else if !PluginInstaller.bundled().isEmpty {
-                        note("App 内置了 \(PluginInstaller.bundled().count) 个漫画插件（成人内容），在「片源管理」打开「成人漫画源」后才会显示在这里。")
-                    }
-                    note("插件在独立沙箱里运行：没有 eval、不能访问未声明的域名和本机 / 局域网地址，每个插件的 cookie 与存储互相隔离，接触不到 Telegram、红果账号和钥匙串。所有插件结果都会过滤未成年人相关内容。")
-                    if let message { Text(message).font(.caption).foregroundStyle(STVTheme.accent).padding(.horizontal, 16).accessibilityIdentifier("plugins.message") }
-                }.padding(.vertical, 12)
-            }
+            pluginScroll
             .background(STVTheme.bg.ignoresSafeArea())
             .navigationTitle("插件")
             .navigationBarTitleDisplayMode(.inline)
@@ -173,6 +97,90 @@ struct PluginsView: View {
                 }
             } catch { message = error.localizedDescription }
             busy = nil
+        }
+    }
+
+    @ViewBuilder private var pluginScroll: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                group("已安装（\(store.visiblePlugins.count)）") {
+                    if store.visiblePlugins.isEmpty {
+                        Text("还没有插件。可以从下面的网址 / 文件 / 订阅添加，或安装内置推荐。").font(.subheadline)
+                            .foregroundStyle(STVTheme.secondary).padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    ForEach(store.visiblePlugins) { p in
+                        WithPerceptionTracking {
+                            NavigationLink { PluginDetailView(id: p.id) } label: { pluginRow(p) }.buttonStyle(.plain)
+                                .accessibilityIdentifier("plugins.row.\(p.id)")
+                            if p.id != store.visiblePlugins.last?.id { Divider().overlay(STVTheme.text.opacity(0.06)).padding(.leading, 48) }
+                        }
+                    }
+                }
+                if hiddenAdult > 0 {
+                    note("另有 \(hiddenAdult) 个成人插件已隐藏：在「片源管理」解锁后显示。")
+                }
+                group("添加插件") {
+                    action("从网址添加", "link", id: "plugins.add.url") { urlText = ""; showURL = true }
+                    action("从文件导入（.idjplugin）", "doc.badge.plus", id: "plugins.add.file") { showFile = true }
+                    action("粘贴插件内容", "doc.on.clipboard", id: "plugins.add.paste") { showPaste = true }
+                    action(busy == "update" ? "正在检查更新…" : "检查更新", "arrow.triangle.2.circlepath", id: "plugins.update") { await checkUpdates() }
+                }
+                ForEach(updates) { u in
+                    WithPerceptionTracking {
+                        Button { pending = u } label: {
+                            HStack { Image(systemName: "arrow.up.circle.fill").foregroundStyle(STVTheme.accent)
+                                Text("\(u.manifest.name) 可更新到 \(u.manifest.version)").foregroundStyle(STVTheme.text); Spacer()
+                                Text("查看权限变化").font(.caption).foregroundStyle(STVTheme.accent) }.padding(14)
+                        }.buttonStyle(.plain).background(STVTheme.surface, in: RoundedRectangle(cornerRadius: 14)).padding(.horizontal, 16)
+                    }
+                }
+                group("订阅") {
+                    ForEach(store.subscriptions) { s in WithPerceptionTracking {
+                        subscriptionBlock(s)
+                    } }
+                    action("添加订阅地址", "plus.circle", id: "plugins.sub.add") { subText = ""; showSub = true }
+                    if !store.subscriptions.isEmpty {
+                        action(busy == "subs" ? "正在刷新…" : "刷新全部订阅", "arrow.clockwise", id: "plugins.sub.refresh") {
+                            busy = "subs"; await store.refreshSubscriptions(); busy = nil
+                        }
+                    }
+                }
+                group("采集站（苹果 CMS）") {
+                    ForEach(cms.visibleSites) { s in WithPerceptionTracking {
+                        cmsRow(s)
+                    } }
+                    action("添加采集站", "server.rack", id: "plugins.cms.add") { showCMS = true }
+                }
+                note("采集站使用内置的苹果 CMS v10 适配器（?ac=list / ?ac=detail），不运行任何脚本；只播放线路里的 m3u8 / mp4 直链，接口需支持 https。")
+                recommendedSection
+                note("插件在独立沙箱里运行：没有 eval、不能访问未声明的域名和本机 / 局域网地址，每个插件的 cookie 与存储互相隔离，接触不到 Telegram、红果账号和钥匙串。所有插件结果都会过滤未成年人相关内容。")
+                if let message { Text(message).font(.caption).foregroundStyle(STVTheme.accent).padding(.horizontal, 16).accessibilityIdentifier("plugins.message") }
+            }.padding(.vertical, 12)
+        }
+    }
+
+    @ViewBuilder private var recommendedSection: some View {
+        if !recommended.isEmpty {
+            group("推荐插件（App 内置）") {
+                ForEach(recommended, id: \.manifest.id) { b in
+                    WithPerceptionTracking {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(b.manifest.name).foregroundStyle(STVTheme.text)
+                                Text(b.manifest.description ?? "").font(.caption).foregroundStyle(STVTheme.secondary).lineLimit(2)
+                            }
+                            Spacer()
+                            if store.plugin(b.manifest.id) != nil { Text("已安装").font(.caption).foregroundStyle(STVTheme.secondary) }
+                            else {
+                                Button("安装") { prepare { try PluginInstaller.prepare(bundle: b.data, origin: "内置：" + b.name) } }
+                                    .buttonStyle(.bordered).tint(STVTheme.accent).accessibilityIdentifier("plugins.bundled.\(b.name)")
+                            }
+                        }.padding(14)
+                    }
+                }
+            }
+        } else if !PluginInstaller.bundled().isEmpty {
+            note("App 内置了 \(PluginInstaller.bundled().count) 个漫画插件（成人内容），在「片源管理」打开「成人漫画源」后才会显示在这里。")
         }
     }
 
